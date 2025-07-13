@@ -1,0 +1,6 @@
+@STCPP.WEB.HUB.APIs_HostAddress = http://localhost:5126
+
+GET {{STCPP.WEB.HUB.APIs_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
