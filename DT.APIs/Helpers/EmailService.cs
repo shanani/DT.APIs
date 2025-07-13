@@ -20,6 +20,8 @@ namespace DT.APIs.Helpers
 
         public async Task SendEmailAsync(EmailModel emailModel)
         {
+            // Normalize and validate the email model
+            NormalizeEmailModel(emailModel);
             ValidateEmailModel(emailModel);
 
             var mailSettings = _configuration.GetSection("MailSettings");
@@ -41,11 +43,19 @@ namespace DT.APIs.Helpers
 
         public async Task<BulkEmailResultModel> SendBulkEmailAsync(BulkEmailModel bulkEmailModel)
         {
+            // Normalize the bulk email model
+            NormalizeBulkEmailModel(bulkEmailModel);
+
             var startTime = DateTime.UtcNow;
             var result = new BulkEmailResultModel
             {
-                TotalEmails = bulkEmailModel.Recipients.Count
+                TotalEmails = bulkEmailModel.Recipients?.Count ?? 0
             };
+
+            if (result.TotalEmails == 0)
+            {
+                throw new ArgumentException("Recipients list cannot be empty");
+            }
 
             if (bulkEmailModel.SendIndividually)
             {
@@ -60,8 +70,141 @@ namespace DT.APIs.Helpers
             return result;
         }
 
+        private void NormalizeEmailModel(EmailModel emailModel)
+        {
+            if (emailModel == null) return;
+
+            // Initialize collections if null
+            emailModel.CC ??= new List<string>();
+            emailModel.BCC ??= new List<string>();
+            emailModel.Attachments ??= new List<EmailAttachment>();
+            emailModel.CustomHeaders ??= new Dictionary<string, string>();
+
+            // Remove null, empty, or invalid emails from CC and BCC
+            emailModel.CC = emailModel.CC.Where(email => !string.IsNullOrWhiteSpace(email) && IsValidEmail(email)).ToList();
+            emailModel.BCC = emailModel.BCC.Where(email => !string.IsNullOrWhiteSpace(email) && IsValidEmail(email)).ToList();
+
+            // Set default ReplyTo if not provided or invalid
+            if (string.IsNullOrWhiteSpace(emailModel.ReplyTo) || !IsValidEmail(emailModel.ReplyTo))
+            {
+                var mailSettings = _configuration.GetSection("MailSettings");
+                emailModel.ReplyTo = mailSettings["SenderEmail"] ?? "noreply@stc.com.sa";
+            }
+
+            // Handle attachments - remove null/invalid ones and set defaults for valid ones
+            if (emailModel.Attachments?.Any() == true)
+            {
+                var validAttachments = new List<EmailAttachment>();
+
+                foreach (var attachment in emailModel.Attachments.Where(att => att != null))
+                {
+                    // Skip attachments with missing critical data
+                    if (string.IsNullOrWhiteSpace(attachment.Content))
+                    {
+                        _logger.LogWarning("Skipping attachment with empty content: {FileName}", attachment.FileName ?? "unknown");
+                        continue;
+                    }
+
+                    // Set default values for missing properties
+                    attachment.FileName = string.IsNullOrWhiteSpace(attachment.FileName) ? "attachment" : attachment.FileName;
+                    attachment.ContentType = string.IsNullOrWhiteSpace(attachment.ContentType) ? "application/octet-stream" : attachment.ContentType;
+                    attachment.ContentId = string.IsNullOrWhiteSpace(attachment.ContentId) ? Guid.NewGuid().ToString() : attachment.ContentId;
+
+                    // Validate base64 content
+                    try
+                    {
+                        Convert.FromBase64String(attachment.Content);
+                        validAttachments.Add(attachment);
+                    }
+                    catch (FormatException)
+                    {
+                        _logger.LogWarning("Skipping attachment with invalid base64 content: {FileName}", attachment.FileName);
+                    }
+                }
+
+                emailModel.Attachments = validAttachments;
+            }
+
+            // Handle custom headers - remove null/empty ones
+            if (emailModel.CustomHeaders?.Any() == true)
+            {
+                var validHeaders = emailModel.CustomHeaders
+                    .Where(h => !string.IsNullOrWhiteSpace(h.Key) && h.Value != null)
+                    .ToDictionary(h => h.Key, h => h.Value ?? string.Empty);
+                emailModel.CustomHeaders = validHeaders;
+            }
+
+            // Ensure subject and body are not null (set defaults if needed)
+            emailModel.Subject ??= "No Subject";
+            emailModel.Body ??= string.Empty;
+        }
+
+        private void NormalizeBulkEmailModel(BulkEmailModel bulkEmailModel)
+        {
+            if (bulkEmailModel == null) return;
+
+            // Initialize collections if null
+            bulkEmailModel.Recipients ??= new List<string>();
+            bulkEmailModel.CC ??= new List<string>();
+            bulkEmailModel.BCC ??= new List<string>();
+            bulkEmailModel.Attachments ??= new List<EmailAttachment>();
+
+            // Remove null, empty, or invalid emails
+            bulkEmailModel.Recipients = bulkEmailModel.Recipients.Where(email => !string.IsNullOrWhiteSpace(email) && IsValidEmail(email)).ToList();
+            bulkEmailModel.CC = bulkEmailModel.CC.Where(email => !string.IsNullOrWhiteSpace(email) && IsValidEmail(email)).ToList();
+            bulkEmailModel.BCC = bulkEmailModel.BCC.Where(email => !string.IsNullOrWhiteSpace(email) && IsValidEmail(email)).ToList();
+
+            // Set default ReplyTo if not provided or invalid
+            if (string.IsNullOrWhiteSpace(bulkEmailModel.ReplyTo) || !IsValidEmail(bulkEmailModel.ReplyTo))
+            {
+                var mailSettings = _configuration.GetSection("MailSettings");
+                bulkEmailModel.ReplyTo = mailSettings["SenderEmail"] ?? "noreply@stc.com.sa";
+            }
+
+            // Handle attachments - same logic as regular email
+            if (bulkEmailModel.Attachments?.Any() == true)
+            {
+                var validAttachments = new List<EmailAttachment>();
+
+                foreach (var attachment in bulkEmailModel.Attachments.Where(att => att != null))
+                {
+                    // Skip attachments with missing critical data
+                    if (string.IsNullOrWhiteSpace(attachment.Content))
+                    {
+                        _logger.LogWarning("Skipping bulk email attachment with empty content: {FileName}", attachment.FileName ?? "unknown");
+                        continue;
+                    }
+
+                    // Set default values for missing properties
+                    attachment.FileName = string.IsNullOrWhiteSpace(attachment.FileName) ? "attachment" : attachment.FileName;
+                    attachment.ContentType = string.IsNullOrWhiteSpace(attachment.ContentType) ? "application/octet-stream" : attachment.ContentType;
+                    attachment.ContentId = string.IsNullOrWhiteSpace(attachment.ContentId) ? Guid.NewGuid().ToString() : attachment.ContentId;
+
+                    // Validate base64 content
+                    try
+                    {
+                        Convert.FromBase64String(attachment.Content);
+                        validAttachments.Add(attachment);
+                    }
+                    catch (FormatException)
+                    {
+                        _logger.LogWarning("Skipping bulk email attachment with invalid base64 content: {FileName}", attachment.FileName);
+                    }
+                }
+
+                bulkEmailModel.Attachments = validAttachments;
+            }
+
+            // Ensure subject and body are not null
+            bulkEmailModel.Subject ??= "No Subject";
+            bulkEmailModel.Body ??= string.Empty;
+        }
+
         private async Task SendIndividualEmails(BulkEmailModel bulkEmailModel, BulkEmailResultModel result)
         {
+            var successCounter = 0;
+            var failureCounter = 0;
+
             var tasks = bulkEmailModel.Recipients.Select(async recipient =>
             {
                 var emailResult = new EmailSendResult
@@ -77,22 +220,23 @@ namespace DT.APIs.Helpers
                         Subject = bulkEmailModel.Subject,
                         RecipientEmail = recipient,
                         Body = bulkEmailModel.Body,
-                        CC = bulkEmailModel.CC,
-                        BCC = bulkEmailModel.BCC,
+                        CC = new List<string>(bulkEmailModel.CC ?? new List<string>()),
+                        BCC = new List<string>(bulkEmailModel.BCC ?? new List<string>()),
+                        ReplyTo = bulkEmailModel.ReplyTo,
                         Priority = bulkEmailModel.Priority,
                         IsBodyHtml = bulkEmailModel.IsBodyHtml,
-                        Attachments = bulkEmailModel.Attachments
+                        Attachments = new List<EmailAttachment>(bulkEmailModel.Attachments ?? new List<EmailAttachment>())
                     };
 
                     await SendEmailAsync(emailModel);
                     emailResult.IsSuccess = true;
-                    result.SuccessfulSends++;
+                    Interlocked.Increment(ref successCounter);
                 }
                 catch (Exception ex)
                 {
                     emailResult.IsSuccess = false;
                     emailResult.ErrorMessage = ex.Message;
-                    result.FailedSends++;
+                    Interlocked.Increment(ref failureCounter);
                     _logger.LogError(ex, "Failed to send bulk email to {Recipient}", recipient);
                 }
 
@@ -103,6 +247,10 @@ namespace DT.APIs.Helpers
             });
 
             await Task.WhenAll(tasks);
+
+            // Update the result counters
+            result.SuccessfulSends = successCounter;
+            result.FailedSends = failureCounter;
         }
 
         private async Task SendSingleEmailToMultipleRecipients(BulkEmailModel bulkEmailModel, BulkEmailResultModel result)
@@ -115,10 +263,11 @@ namespace DT.APIs.Helpers
                     RecipientEmail = bulkEmailModel.Recipients.First(),
                     Body = bulkEmailModel.Body,
                     CC = bulkEmailModel.Recipients.Skip(1).Concat(bulkEmailModel.CC ?? new List<string>()).ToList(),
-                    BCC = bulkEmailModel.BCC,
+                    BCC = new List<string>(bulkEmailModel.BCC ?? new List<string>()),
+                    ReplyTo = bulkEmailModel.ReplyTo,
                     Priority = bulkEmailModel.Priority,
                     IsBodyHtml = bulkEmailModel.IsBodyHtml,
-                    Attachments = bulkEmailModel.Attachments
+                    Attachments = new List<EmailAttachment>(bulkEmailModel.Attachments ?? new List<EmailAttachment>())
                 };
 
                 await SendEmailAsync(emailModel);
@@ -141,6 +290,7 @@ namespace DT.APIs.Helpers
                     ErrorMessage = ex.Message,
                     SentAt = DateTime.UtcNow
                 }));
+                _logger.LogError(ex, "Failed to send bulk email to multiple recipients");
             }
         }
 
@@ -149,47 +299,66 @@ namespace DT.APIs.Helpers
             var mailMessage = new MailMessage
             {
                 From = new MailAddress(mailSettings["SenderEmail"], mailSettings["SenderName"]),
-                Subject = emailModel.Subject,
-                Body = emailModel.Body,
+                Subject = emailModel.Subject ?? string.Empty,
+                Body = emailModel.Body ?? string.Empty,
                 IsBodyHtml = emailModel.IsBodyHtml,
                 Priority = emailModel.Priority
             };
 
             // Add primary recipient
-            mailMessage.To.Add(new MailAddress(emailModel.RecipientEmail, emailModel.RecipientName ?? ""));
+            mailMessage.To.Add(new MailAddress(emailModel.RecipientEmail, emailModel.RecipientName ?? string.Empty));
 
-            // Add CC recipients
+            // Add CC recipients (only valid ones)
             if (emailModel.CC?.Any() == true)
             {
-                foreach (var cc in emailModel.CC)
+                foreach (var cc in emailModel.CC.Where(IsValidEmail))
                 {
-                    if (IsValidEmail(cc))
+                    try
+                    {
                         mailMessage.CC.Add(cc);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to add CC recipient: {CC}", cc);
+                    }
                 }
             }
 
-            // Add BCC recipients
+            // Add BCC recipients (only valid ones)
             if (emailModel.BCC?.Any() == true)
             {
-                foreach (var bcc in emailModel.BCC)
+                foreach (var bcc in emailModel.BCC.Where(IsValidEmail))
                 {
-                    if (IsValidEmail(bcc))
+                    try
+                    {
                         mailMessage.Bcc.Add(bcc);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to add BCC recipient: {BCC}", bcc);
+                    }
                 }
             }
 
-            // Set reply-to
-            if (!string.IsNullOrEmpty(emailModel.ReplyTo) && IsValidEmail(emailModel.ReplyTo))
+            // Set reply-to (already normalized)
+            if (!string.IsNullOrWhiteSpace(emailModel.ReplyTo) && IsValidEmail(emailModel.ReplyTo))
             {
                 mailMessage.ReplyToList.Add(emailModel.ReplyTo);
             }
 
-            // Add custom headers
+            // Add custom headers (only valid ones)
             if (emailModel.CustomHeaders?.Any() == true)
             {
                 foreach (var header in emailModel.CustomHeaders)
                 {
-                    mailMessage.Headers.Add(header.Key, header.Value);
+                    try
+                    {
+                        mailMessage.Headers.Add(header.Key, header.Value);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to add custom header: {Key}={Value}", header.Key, header.Value);
+                    }
                 }
             }
 
@@ -232,6 +401,12 @@ namespace DT.APIs.Helpers
             {
                 try
                 {
+                    if (string.IsNullOrWhiteSpace(attachment.Content))
+                    {
+                        _logger.LogWarning("Skipping attachment with empty content: {FileName}", attachment.FileName);
+                        continue;
+                    }
+
                     var fileBytes = Convert.FromBase64String(attachment.Content);
                     var memoryStream = new MemoryStream(fileBytes);
 
@@ -248,7 +423,7 @@ namespace DT.APIs.Helpers
                     else
                     {
                         // Regular attachment
-                        var mailAttachment = new Attachment(memoryStream, attachment.FileName)
+                        var mailAttachment = new Attachment(memoryStream, attachment.FileName ?? "attachment")
                         {
                             ContentType = new ContentType(attachment.ContentType ?? "application/octet-stream")
                         };
@@ -264,35 +439,42 @@ namespace DT.APIs.Helpers
 
         private void AddDefaultTemplateImages(MailMessage mailMessage, string body)
         {
-            var logoPath = Path.Combine(_env.WebRootPath, "site/images/mail_logo.png");
-            var headerPath = Path.Combine(_env.WebRootPath, "site/images/mail_header.png");
-
-            if (!File.Exists(logoPath) && !File.Exists(headerPath))
-                return;
-
-            var htmlView = AlternateView.CreateAlternateViewFromString(body, null, MediaTypeNames.Text.Html);
-
-            if (File.Exists(logoPath))
+            try
             {
-                var logoImage = new LinkedResource(logoPath)
-                {
-                    ContentId = "mail_img1",
-                    ContentType = new ContentType("image/png")
-                };
-                htmlView.LinkedResources.Add(logoImage);
-            }
+                var logoPath = Path.Combine(_env.WebRootPath ?? string.Empty, "site/images/mail_logo.png");
+                var headerPath = Path.Combine(_env.WebRootPath ?? string.Empty, "site/images/mail_header.png");
 
-            if (File.Exists(headerPath))
+                if (!File.Exists(logoPath) && !File.Exists(headerPath))
+                    return;
+
+                var htmlView = AlternateView.CreateAlternateViewFromString(body, null, MediaTypeNames.Text.Html);
+
+                if (File.Exists(logoPath))
+                {
+                    var logoImage = new LinkedResource(logoPath)
+                    {
+                        ContentId = "mail_img1",
+                        ContentType = new ContentType("image/png")
+                    };
+                    htmlView.LinkedResources.Add(logoImage);
+                }
+
+                if (File.Exists(headerPath))
+                {
+                    var headerImage = new LinkedResource(headerPath)
+                    {
+                        ContentId = "mail_img2",
+                        ContentType = new ContentType("image/png")
+                    };
+                    htmlView.LinkedResources.Add(headerImage);
+                }
+
+                mailMessage.AlternateViews.Add(htmlView);
+            }
+            catch (Exception ex)
             {
-                var headerImage = new LinkedResource(headerPath)
-                {
-                    ContentId = "mail_img2",
-                    ContentType = new ContentType("image/png")
-                };
-                htmlView.LinkedResources.Add(headerImage);
+                _logger.LogWarning(ex, "Failed to add default template images");
             }
-
-            mailMessage.AlternateViews.Add(htmlView);
         }
 
         private void ValidateEmailModel(EmailModel emailModel)
@@ -300,21 +482,24 @@ namespace DT.APIs.Helpers
             if (emailModel == null)
                 throw new ArgumentNullException(nameof(emailModel), "Email model cannot be null.");
 
-            if (string.IsNullOrEmpty(emailModel.RecipientEmail))
+            if (string.IsNullOrWhiteSpace(emailModel.RecipientEmail))
                 throw new ArgumentException("Recipient email cannot be null or empty.", nameof(emailModel.RecipientEmail));
 
             if (!IsValidEmail(emailModel.RecipientEmail))
                 throw new ArgumentException("Invalid recipient email format.", nameof(emailModel.RecipientEmail));
 
-            if (string.IsNullOrEmpty(emailModel.Subject))
+            if (string.IsNullOrWhiteSpace(emailModel.Subject))
                 throw new ArgumentException("Subject cannot be null or empty.", nameof(emailModel.Subject));
 
-            if (string.IsNullOrEmpty(emailModel.Body))
+            if (string.IsNullOrWhiteSpace(emailModel.Body))
                 throw new ArgumentException("Body cannot be null or empty.", nameof(emailModel.Body));
         }
 
         private bool IsValidEmail(string email)
         {
+            if (string.IsNullOrWhiteSpace(email))
+                return false;
+
             try
             {
                 var addr = new MailAddress(email);
@@ -326,12 +511,18 @@ namespace DT.APIs.Helpers
             }
         }
 
-        public string ProcessTemplate(string template, Dictionary<string, string> placeholders)
+        public string ProcessTemplate(string template, Dictionary<string, string>? placeholders)
         {
+            if (string.IsNullOrWhiteSpace(template))
+                return string.Empty;
+
+            if (placeholders == null || !placeholders.Any())
+                return template;
+
             var result = template;
-            foreach (var placeholder in placeholders)
+            foreach (var placeholder in placeholders.Where(p => !string.IsNullOrWhiteSpace(p.Key)))
             {
-                result = result.Replace($"{{{placeholder.Key}}}", placeholder.Value);
+                result = result.Replace($"{{{placeholder.Key}}}", placeholder.Value ?? string.Empty);
             }
             return result;
         }

@@ -8,25 +8,25 @@ namespace DT.APIs.Models
     {
         [Required]
         [SwaggerSchema(Description = "Email subject")]
-        public string Subject { get; set; }
+        public string Subject { get; set; } = string.Empty;
 
         [Required]
         [EmailAddress]
         [SwaggerSchema(Description = "Primary recipient email")]
-        public string RecipientEmail { get; set; }
+        public string RecipientEmail { get; set; } = string.Empty;
 
         [SwaggerSchema(Description = "Recipient display name")]
         public string? RecipientName { get; set; }
 
         [Required]
         [SwaggerSchema(Description = "Email body content")]
-        public string Body { get; set; }
+        public string Body { get; set; } = string.Empty;
 
         [SwaggerSchema(Description = "CC recipients")]
-        public List<string>? CC { get; set; }
+        public List<string> CC { get; set; } = new List<string>();
 
         [SwaggerSchema(Description = "BCC recipients")]
-        public List<string>? BCC { get; set; }
+        public List<string> BCC { get; set; } = new List<string>();
 
         [SwaggerSchema(Description = "Reply-to email address")]
         [EmailAddress]
@@ -39,35 +39,25 @@ namespace DT.APIs.Models
         public bool IsBodyHtml { get; set; } = true;
 
         [SwaggerSchema(Description = "File attachments (Base64 encoded)")]
-        public List<EmailAttachment>? Attachments { get; set; }
+        public List<EmailAttachment> Attachments { get; set; } = new List<EmailAttachment>();
 
         [SwaggerSchema(Description = "Custom headers")]
-        public Dictionary<string, string>? CustomHeaders { get; set; }
+        public Dictionary<string, string> CustomHeaders { get; set; } = new Dictionary<string, string>();
 
         [SwaggerSchema(Description = "Request delivery notification")]
         public bool RequestDeliveryNotification { get; set; } = false;
 
         [SwaggerSchema(Description = "Request read receipt")]
         public bool RequestReadReceipt { get; set; } = false;
-
-        public EmailModel()
-        {
-            CC = new List<string>();
-            BCC = new List<string>();
-            Attachments = new List<EmailAttachment>();
-            CustomHeaders = new Dictionary<string, string>();
-        }
     }
 
     public class EmailAttachment
     {
-        [Required]
         [SwaggerSchema(Description = "File name with extension")]
-        public string FileName { get; set; }
+        public string FileName { get; set; } = string.Empty;
 
-        [Required]
         [SwaggerSchema(Description = "Base64 encoded file content")]
-        public string Content { get; set; }
+        public string Content { get; set; } = string.Empty;
 
         [SwaggerSchema(Description = "MIME content type (e.g., application/pdf, image/png)")]
         public string? ContentType { get; set; }
@@ -83,21 +73,24 @@ namespace DT.APIs.Models
     {
         [Required]
         [SwaggerSchema(Description = "Email subject")]
-        public string Subject { get; set; }
+        public string Subject { get; set; } = string.Empty;
 
         [Required]
         [SwaggerSchema(Description = "Email body content")]
-        public string Body { get; set; }
+        public string Body { get; set; } = string.Empty;
 
         [Required]
         [SwaggerSchema(Description = "List of recipient emails")]
-        public List<string> Recipients { get; set; }
+        public List<string> Recipients { get; set; } = new List<string>();
 
         [SwaggerSchema(Description = "CC recipients for all emails")]
-        public List<string>? CC { get; set; }
+        public List<string> CC { get; set; } = new List<string>();
 
         [SwaggerSchema(Description = "BCC recipients for all emails")]
-        public List<string>? BCC { get; set; }
+        public List<string> BCC { get; set; } = new List<string>();
+
+        [SwaggerSchema(Description = "Reply-to email address")]
+        public string? ReplyTo { get; set; }
 
         [SwaggerSchema(Description = "Email priority")]
         public MailPriority Priority { get; set; } = MailPriority.Normal;
@@ -106,18 +99,10 @@ namespace DT.APIs.Models
         public bool IsBodyHtml { get; set; } = true;
 
         [SwaggerSchema(Description = "File attachments")]
-        public List<EmailAttachment>? Attachments { get; set; }
+        public List<EmailAttachment> Attachments { get; set; } = new List<EmailAttachment>();
 
         [SwaggerSchema(Description = "Send emails individually (true) or as one email with multiple recipients (false)")]
         public bool SendIndividually { get; set; } = true;
-
-        public BulkEmailModel()
-        {
-            Recipients = new List<string>();
-            CC = new List<string>();
-            BCC = new List<string>();
-            Attachments = new List<EmailAttachment>();
-        }
     }
 
     public class BulkEmailResultModel
@@ -125,18 +110,13 @@ namespace DT.APIs.Models
         public int TotalEmails { get; set; }
         public int SuccessfulSends { get; set; }
         public int FailedSends { get; set; }
-        public List<EmailSendResult> Results { get; set; }
+        public List<EmailSendResult> Results { get; set; } = new List<EmailSendResult>();
         public TimeSpan TotalProcessingTime { get; set; }
-
-        public BulkEmailResultModel()
-        {
-            Results = new List<EmailSendResult>();
-        }
     }
 
     public class EmailSendResult
     {
-        public string RecipientEmail { get; set; }
+        public string RecipientEmail { get; set; } = string.Empty;
         public bool IsSuccess { get; set; }
         public string? ErrorMessage { get; set; }
         public DateTime SentAt { get; set; }
@@ -145,19 +125,14 @@ namespace DT.APIs.Models
     public class EmailTemplateModel
     {
         [Required]
-        public string TemplateName { get; set; }
+        public string TemplateName { get; set; } = string.Empty;
 
         [Required]
-        public string Subject { get; set; }
+        public string Subject { get; set; } = string.Empty;
 
         [Required]
-        public string Body { get; set; }
+        public string Body { get; set; } = string.Empty;
 
-        public Dictionary<string, string>? Placeholders { get; set; }
-
-        public EmailTemplateModel()
-        {
-            Placeholders = new Dictionary<string, string>();
-        }
+        public Dictionary<string, string> Placeholders { get; set; } = new Dictionary<string, string>();
     }
 }

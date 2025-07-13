@@ -45,6 +45,12 @@ namespace DT.APIs.Controllers
         {
             try
             {
+                // Basic null check
+                if (emailModel == null)
+                {
+                    return BadRequest("Email model cannot be null");
+                }
+
                 await _emailService.SendEmailAsync(emailModel);
                 return Ok(true);
             }
@@ -66,15 +72,21 @@ namespace DT.APIs.Controllers
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> SendBulkEmail([FromBody] BulkEmailModel bulkEmailModel)
         {
-            if (bulkEmailModel?.Recipients == null || !bulkEmailModel.Recipients.Any())
-            {
-                return BadRequest("Recipients list cannot be empty");
-            }
-
             try
             {
+                // Basic null check
+                if (bulkEmailModel == null)
+                {
+                    return BadRequest("Bulk email model cannot be null");
+                }
+
                 var result = await _emailService.SendBulkEmailAsync(bulkEmailModel);
                 return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogWarning(ex, "Invalid bulk email data provided");
+                return BadRequest(ex.Message);
             }
             catch (Exception ex)
             {
@@ -89,22 +101,33 @@ namespace DT.APIs.Controllers
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> SendTemplateEmail([FromBody] EmailTemplateModel templateModel, [FromQuery] string recipientEmail)
         {
-            if (string.IsNullOrEmpty(recipientEmail))
-            {
-                return BadRequest("Recipient email is required");
-            }
-
             try
             {
+                if (templateModel == null)
+                {
+                    return BadRequest("Template model cannot be null");
+                }
+
+                if (string.IsNullOrWhiteSpace(recipientEmail))
+                {
+                    return BadRequest("Recipient email is required");
+                }
+
+                // Handle null placeholders gracefully
+                templateModel.Placeholders ??= new Dictionary<string, string>();
+                templateModel.Subject ??= "No Subject";
+                templateModel.Body ??= string.Empty;
+
                 var processedSubject = _emailService.ProcessTemplate(templateModel.Subject, templateModel.Placeholders);
                 var processedBody = _emailService.ProcessTemplate(templateModel.Body, templateModel.Placeholders);
 
                 var emailModel = new EmailModel
                 {
                     Subject = processedSubject,
-                    RecipientEmail = recipientEmail,
+                    RecipientEmail = recipientEmail.Trim(),
                     Body = processedBody,
                     IsBodyHtml = true
+                    // All other properties will be handled by NormalizeEmailModel
                 };
 
                 await _emailService.SendEmailAsync(emailModel);
@@ -129,33 +152,43 @@ namespace DT.APIs.Controllers
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> SendEmailWithAttachments([FromBody] EmailModel emailModel)
         {
-            // Check attachment size limits (e.g., 25MB total)
-            const int maxTotalSizeMB = 25;
-            const int maxTotalSizeBytes = maxTotalSizeMB * 1024 * 1024;
-
-            if (emailModel?.Attachments?.Any() == true)
-            {
-                var totalSize = emailModel.Attachments.Sum(a =>
-                {
-                    try
-                    {
-                        return Convert.FromBase64String(a.Content).Length;
-                    }
-                    catch
-                    {
-                        return 0;
-                    }
-                });
-
-                if (totalSize > maxTotalSizeBytes)
-                {
-                    return StatusCode(StatusCodes.Status413RequestEntityTooLarge,
-                        $"Total attachment size exceeds {maxTotalSizeMB}MB limit");
-                }
-            }
-
             try
             {
+                if (emailModel == null)
+                {
+                    return BadRequest("Email model cannot be null");
+                }
+
+                // Check attachment size limits (e.g., 25MB total) - only if attachments exist
+                const int maxTotalSizeMB = 25;
+                const int maxTotalSizeBytes = maxTotalSizeMB * 1024 * 1024;
+
+                if (emailModel.Attachments?.Any() == true)
+                {
+                    var totalSize = 0L;
+                    foreach (var attachment in emailModel.Attachments)
+                    {
+                        if (!string.IsNullOrWhiteSpace(attachment?.Content))
+                        {
+                            try
+                            {
+                                totalSize += Convert.FromBase64String(attachment.Content).Length;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Invalid attachment content for {FileName}", attachment.FileName);
+                                // Continue with other attachments
+                            }
+                        }
+                    }
+
+                    if (totalSize > maxTotalSizeBytes)
+                    {
+                        return StatusCode(StatusCodes.Status413RequestEntityTooLarge,
+                            $"Total attachment size exceeds {maxTotalSizeMB}MB limit");
+                    }
+                }
+
                 await _emailService.SendEmailAsync(emailModel);
                 return Ok(true);
             }
@@ -180,15 +213,13 @@ namespace DT.APIs.Controllers
             {
                 var mailSettings = _configuration.GetSection("MailSettings");
 
-                using var smtpClient = new System.Net.Mail.SmtpClient(mailSettings["Server"], int.Parse(mailSettings["Port"]));
-
-                // Test connection without sending
                 var testEmail = new EmailModel
                 {
                     Subject = "Email Service Test",
-                    RecipientEmail = mailSettings["SenderEmail"], // Send to self
+                    RecipientEmail = mailSettings["SenderEmail"] ?? "test@example.com",
                     Body = "<h1>Email Service Test</h1><p>This is a test email to verify the email service is working correctly.</p>",
                     IsBodyHtml = true
+                    // Intentionally leaving other properties null to test normalization
                 };
 
                 await _emailService.SendEmailAsync(testEmail);
@@ -212,6 +243,55 @@ namespace DT.APIs.Controllers
                     message = "Email service connection failed",
                     error = ex.Message
                 });
+            }
+        }
+
+        [HttpPost("send-email-flexible-test")]
+        [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> SendEmailFlexibleTest([FromBody] EmailModel emailModel)
+        {
+            try
+            {
+                if (emailModel == null)
+                {
+                    return BadRequest("Email model cannot be null");
+                }
+
+                _logger.LogInformation("Testing flexible email handling with input: {@EmailModel}", new
+                {
+                    emailModel.Subject,
+                    emailModel.RecipientEmail,
+                    emailModel.ReplyTo,
+                    CCCount = emailModel.CC?.Count ?? 0,
+                    BCCCount = emailModel.BCC?.Count ?? 0,
+                    AttachmentsCount = emailModel.Attachments?.Count ?? 0,
+                    CustomHeadersCount = emailModel.CustomHeaders?.Count ?? 0
+                });
+
+                await _emailService.SendEmailAsync(emailModel);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Email sent successfully with flexible handling",
+                    processedAt = DateTime.UtcNow,
+                    originalReplyTo = emailModel.ReplyTo,
+                    finalCCCount = emailModel.CC?.Count ?? 0,
+                    finalBCCCount = emailModel.BCC?.Count ?? 0,
+                    finalAttachmentsCount = emailModel.Attachments?.Count ?? 0
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogWarning(ex, "Invalid email data provided in flexible test");
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in flexible email test");
+                return StatusCode(StatusCodes.Status500InternalServerError, "Failed to send test email");
             }
         }
 
