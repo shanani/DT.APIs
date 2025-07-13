@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+	  <!-- ADD these new packages -->
+	  <PackageReference Include="HtmlAgilityPack" Version="1.12.1" />
+	  <PackageReference Include="MailKit" Version="4.3.0" />
+	  <PackageReference Include="MimeKit" Version="4.3.0" />
+	  
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.10" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation" Version="8.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.10" />
