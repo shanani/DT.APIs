@@ -1,9 +1,10 @@
-using System.Data;
 using DT.APIs.Helpers;
 using DT.APIs.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using System.Data;
+using System.Drawing;
 
 
 namespace DT.APIs.Controllers
@@ -20,13 +21,202 @@ namespace DT.APIs.Controllers
 
         private readonly IConfiguration _configuration;
 
-        public HUBController(ILogger<HUBController> logger, IConfiguration configuration)
+        private readonly EmailService _emailService;
+
+
+        public HUBController(ILogger<HUBController> logger, IConfiguration configuration, EmailService emailService)
         {
             _logger = logger;
             _connectionString = configuration.GetConnectionString("HubDbConn")!;
             _configuration = configuration;
+            _emailService = emailService;
 
         }
+
+
+
+        #region Email APIs
+
+        [HttpPost("send-email")]
+        [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> SendEmail([FromBody] EmailModel emailModel)
+        {
+            try
+            {
+                await _emailService.SendEmailAsync(emailModel);
+                return Ok(true);
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogWarning(ex, "Invalid email data provided");
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending email to {RecipientEmail}", emailModel?.RecipientEmail);
+                return StatusCode(StatusCodes.Status500InternalServerError, "Failed to send email");
+            }
+        }
+
+        [HttpPost("send-bulk-email")]
+        [ProducesResponseType(typeof(BulkEmailResultModel), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> SendBulkEmail([FromBody] BulkEmailModel bulkEmailModel)
+        {
+            if (bulkEmailModel?.Recipients == null || !bulkEmailModel.Recipients.Any())
+            {
+                return BadRequest("Recipients list cannot be empty");
+            }
+
+            try
+            {
+                var result = await _emailService.SendBulkEmailAsync(bulkEmailModel);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending bulk email");
+                return StatusCode(StatusCodes.Status500InternalServerError, "Failed to send bulk email");
+            }
+        }
+
+        [HttpPost("send-template-email")]
+        [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> SendTemplateEmail([FromBody] EmailTemplateModel templateModel, [FromQuery] string recipientEmail)
+        {
+            if (string.IsNullOrEmpty(recipientEmail))
+            {
+                return BadRequest("Recipient email is required");
+            }
+
+            try
+            {
+                var processedSubject = _emailService.ProcessTemplate(templateModel.Subject, templateModel.Placeholders);
+                var processedBody = _emailService.ProcessTemplate(templateModel.Body, templateModel.Placeholders);
+
+                var emailModel = new EmailModel
+                {
+                    Subject = processedSubject,
+                    RecipientEmail = recipientEmail,
+                    Body = processedBody,
+                    IsBodyHtml = true
+                };
+
+                await _emailService.SendEmailAsync(emailModel);
+                return Ok(true);
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogWarning(ex, "Invalid template email data provided");
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending template email to {RecipientEmail}", recipientEmail);
+                return StatusCode(StatusCodes.Status500InternalServerError, "Failed to send template email");
+            }
+        }
+
+        [HttpPost("send-email-with-attachments")]
+        [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status413RequestEntityTooLarge)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> SendEmailWithAttachments([FromBody] EmailModel emailModel)
+        {
+            // Check attachment size limits (e.g., 25MB total)
+            const int maxTotalSizeMB = 25;
+            const int maxTotalSizeBytes = maxTotalSizeMB * 1024 * 1024;
+
+            if (emailModel?.Attachments?.Any() == true)
+            {
+                var totalSize = emailModel.Attachments.Sum(a =>
+                {
+                    try
+                    {
+                        return Convert.FromBase64String(a.Content).Length;
+                    }
+                    catch
+                    {
+                        return 0;
+                    }
+                });
+
+                if (totalSize > maxTotalSizeBytes)
+                {
+                    return StatusCode(StatusCodes.Status413RequestEntityTooLarge,
+                        $"Total attachment size exceeds {maxTotalSizeMB}MB limit");
+                }
+            }
+
+            try
+            {
+                await _emailService.SendEmailAsync(emailModel);
+                return Ok(true);
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogWarning(ex, "Invalid email data provided");
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending email with attachments to {RecipientEmail}", emailModel?.RecipientEmail);
+                return StatusCode(StatusCodes.Status500InternalServerError, "Failed to send email with attachments");
+            }
+        }
+
+        [HttpGet("test-email-connection")]
+        [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> TestEmailConnection()
+        {
+            try
+            {
+                var mailSettings = _configuration.GetSection("MailSettings");
+
+                using var smtpClient = new System.Net.Mail.SmtpClient(mailSettings["Server"], int.Parse(mailSettings["Port"]));
+
+                // Test connection without sending
+                var testEmail = new EmailModel
+                {
+                    Subject = "Email Service Test",
+                    RecipientEmail = mailSettings["SenderEmail"], // Send to self
+                    Body = "<h1>Email Service Test</h1><p>This is a test email to verify the email service is working correctly.</p>",
+                    IsBodyHtml = true
+                };
+
+                await _emailService.SendEmailAsync(testEmail);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Email service is working correctly",
+                    server = mailSettings["Server"],
+                    port = mailSettings["Port"],
+                    senderEmail = mailSettings["SenderEmail"],
+                    testSentAt = DateTime.UtcNow
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Email connection test failed");
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    success = false,
+                    message = "Email service connection failed",
+                    error = ex.Message
+                });
+            }
+        }
+
+        #endregion
+
 
         #region AD APIs
 
