@@ -179,7 +179,7 @@ namespace DT.APIs.Controllers
                                 _logger.LogWarning(ex, "Invalid attachment content for {FileName}", attachment.FileName);
                                 // Continue with other attachments
                             }
-                        } 
+                        }
                     }
 
                     if (totalSize > maxTotalSizeBytes)
