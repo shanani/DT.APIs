@@ -45,6 +45,154 @@ namespace DT.APIs.Helpers
             return _configuration[key] ?? throw new ArgumentNullException($"Config key {key} is missing.");
         }
 
+
+
+        public List<ADUserDetails> FindUserDetailsFromSearch(string searchKey)
+        {
+            var debugInfo = new List<string>();
+            var errors = new List<string>();
+            var adUserDetails = new List<ADUserDetails>();
+
+            try
+            {
+                debugInfo.Add($"Starting search with key: '{searchKey}'");
+
+                // Use the existing FindUsers method
+                var adUsers = FindUsers(searchKey);
+                debugInfo.Add($"FindUsers returned {adUsers?.Count ?? 0} users");
+
+                if (adUsers == null || !adUsers.Any())
+                {
+                    debugInfo.Add("No users found from FindUsers method");
+                    throw new InvalidOperationException($"Search completed but no users found. Debug: {string.Join(" | ", debugInfo)}");
+                }
+
+                var usersToProcess = adUsers.Take(10).ToList();
+                debugInfo.Add($"Processing top {usersToProcess.Count} users");
+
+                for (int i = 0; i < usersToProcess.Count; i++)
+                {
+                    var adUser = usersToProcess[i];
+                    try
+                    {
+                        debugInfo.Add($"Processing user {i + 1}: Username='{adUser.UserName}', DisplayName='{adUser.DisplayName}'");
+
+                        if (string.IsNullOrEmpty(adUser.UserName))
+                        {
+                            errors.Add($"User {i + 1}: Username is null or empty");
+                            continue;
+                        }
+
+                        // Get detailed user information using the existing method
+                        var userDetails = GetUserDetailsByUsername(adUser.UserName);
+
+                        if (userDetails != null)
+                        {
+                            debugInfo.Add($"User {i + 1}: Successfully retrieved details for '{adUser.UserName}'");
+                            adUserDetails.Add(userDetails);
+                        }
+                        else
+                        {
+                            errors.Add($"User {i + 1}: GetUserDetailsByUsername returned null for '{adUser.UserName}'");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        errors.Add($"User {i + 1} ('{adUser?.UserName}'): {ex.Message}");
+                        debugInfo.Add($"User {i + 1}: Exception occurred - {ex.GetType().Name}");
+                        continue;
+                    }
+                }
+
+                debugInfo.Add($"Successfully processed {adUserDetails.Count} users out of {usersToProcess.Count}");
+
+                if (!adUserDetails.Any() && errors.Any())
+                {
+                    throw new InvalidOperationException($"No user details retrieved. Errors: {string.Join(" | ", errors)}. Debug: {string.Join(" | ", debugInfo)}");
+                }
+
+                return adUserDetails;
+            }
+            catch (Exception ex)
+            {
+                var allInfo = string.Join(" | ", debugInfo.Concat(errors));
+                throw new InvalidOperationException($"FindUserDetailsFromSearch failed: {ex.Message}. Debug Info: {allInfo}", ex);
+            }
+        }
+
+        public List<ADUserDetails> FindUserDetails(string searchKey)
+        {
+            var adUserDetails = new List<ADUserDetails>();
+            searchKey = (searchKey ?? "").Trim();
+
+            if (searchKey.Length >= 3)
+            {
+                try
+                {
+                    // Search by sAMAccountName (username)
+                    using (var user = new UserPrincipal(_principalContext))
+                    {
+                        user.SamAccountName = searchKey + "*";
+                        AddUserDetailsFromSearch(adUserDetails, user);
+                    }
+
+                    // Search by DisplayName if we don't have enough results
+                    if (adUserDetails.Count < 10)
+                    {
+                        using (var user = new UserPrincipal(_principalContext))
+                        {
+                            user.DisplayName = searchKey + "*";
+                            AddUserDetailsFromSearch(adUserDetails, user);
+                        }
+                    }
+
+                    // Search by Email if we still don't have enough results
+                    if (adUserDetails.Count < 10)
+                    {
+                        using (var user = new UserPrincipal(_principalContext))
+                        {
+                            user.EmailAddress = searchKey + "*";
+                            AddUserDetailsFromSearch(adUserDetails, user);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException($"Error searching AD users: {ex.Message}", ex);
+                }
+            }
+
+            // Return distinct results (by LoginName) and take top 10
+            return adUserDetails
+                .DistinctBy(u => u.LoginName)
+                .Take(10)
+                .ToList();
+        }
+
+        private void AddUserDetailsFromSearch(List<ADUserDetails> adUserDetails, UserPrincipal user)
+        {
+            using (var searcher = new PrincipalSearcher(user))
+            {
+                foreach (var result in searcher.FindAll())
+                {
+                    if (result.GetUnderlyingObject() is DirectoryEntry de)
+                    {
+                        var userDetails = GetADUserDetails(de, result.SamAccountName);
+
+                        if (userDetails != null && !adUserDetails.Any(a => a.LoginName == userDetails.LoginName))
+                        {
+                            adUserDetails.Add(userDetails);
+
+                            // Stop if we have 10 results
+                            if (adUserDetails.Count >= 10)
+                                break;
+                        }
+                    }
+                }
+            }
+        }
+
+
         public List<ADUserModel> FindUsers(string searchKey)
         {
             var adUsers = new List<ADUserModel>();
@@ -174,29 +322,23 @@ namespace DT.APIs.Helpers
             }
         }
 
+   
         public ADUserDetails GetUserDetailsByUsername(string userName)
         {
-            string domain = GetConfigValue("ActiveDirectorySettings:Domain");
-            string user = GetConfigValue("ActiveDirectorySettings:User");
+            // Use the existing _principalContext instead of creating a new one
+            var userPrincipal = new UserPrincipal(_principalContext) { SamAccountName = userName };
 
-            // Use _principalContext to authenticate with the service account
-            using (var context = new PrincipalContext(ContextType.Domain, domain, user))
+            using (var searcher = new PrincipalSearcher(userPrincipal))
             {
-                // Authenticate against the domain, and retrieve the user
-                var userPrincipal = new UserPrincipal(context) { SamAccountName = userName };
-                using (var searcher = new PrincipalSearcher(userPrincipal))
+                var result = searcher.FindOne();
+                if (result != null && result.GetUnderlyingObject() is DirectoryEntry de)
                 {
-                    var result = searcher.FindOne();
-                    if (result != null && result.GetUnderlyingObject() is DirectoryEntry de)
-                    {
-                        return GetADUserDetails(de, userName);
-                    }
+                    return GetADUserDetails(de, userName);
                 }
             }
+
             return null; // Return null if no user is found
         }
-
-
 
         public void UpdateUserProperty(string userName, string password, string propertyName, object value)
         {

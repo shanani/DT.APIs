@@ -69,6 +69,158 @@ namespace DT.APIs.Helpers
             }
         }
 
+         
+        private MimeMessage CreateMimeMessage(EmailModel emailModel, IConfigurationSection mailSettings)
+        {
+            var message = new MimeMessage();
+
+            // Set sender
+            message.From.Add(new MailboxAddress(
+                mailSettings["SenderName"] ?? "System",
+                mailSettings["SenderEmail"]
+            ));
+
+            // Set recipient
+            message.To.Add(new MailboxAddress(
+                emailModel.RecipientName ?? string.Empty,
+                emailModel.RecipientEmail
+            ));
+
+            // Add CC recipients (already normalized)
+            if (emailModel.CC?.Any() == true)
+            {
+                foreach (var cc in emailModel.CC)
+                {
+                    message.Cc.Add(new MailboxAddress(string.Empty, cc));
+                }
+            }
+
+            // Add BCC recipients (already normalized)
+            if (emailModel.BCC?.Any() == true)
+            {
+                foreach (var bcc in emailModel.BCC)
+                {
+                    message.Bcc.Add(new MailboxAddress(string.Empty, bcc));
+                }
+            }
+
+            // Set subject and reply-to
+            message.Subject = emailModel.Subject ?? string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(emailModel.ReplyTo))
+            {
+                message.ReplyTo.Add(new MailboxAddress(string.Empty, emailModel.ReplyTo));
+            }
+
+            // Set priority
+            message.Priority = emailModel.Priority switch
+            {
+                System.Net.Mail.MailPriority.High => MessagePriority.Urgent,
+                System.Net.Mail.MailPriority.Low => MessagePriority.NonUrgent,
+                _ => MessagePriority.Normal
+            };
+
+            // 🎯 KEY UPGRADE: Use BodyBuilder for CID support
+            var bodyBuilder = new BodyBuilder();
+
+            // Set the main body content
+            if (emailModel.IsBodyHtml)
+            {
+                bodyBuilder.HtmlBody = emailModel.Body ?? string.Empty;
+            }
+            else
+            {
+                bodyBuilder.TextBody = emailModel.Body ?? string.Empty;
+            }
+
+            // 🚀 CID SUPPORT: Handle attachments properly
+            if (emailModel.Attachments?.Any() == true)
+            {
+                foreach (var attachment in emailModel.Attachments)
+                {
+                    try
+                    {
+                        var fileBytes = Convert.FromBase64String(attachment.Content);
+                        using var memoryStream = new MemoryStream(fileBytes);
+
+                        if (attachment.IsInline && !string.IsNullOrWhiteSpace(attachment.ContentId))
+                        {
+                            // ✅ INLINE ATTACHMENT with CID support
+                            var linkedResource = bodyBuilder.LinkedResources.Add(
+                                attachment.FileName,
+                                memoryStream
+                            );
+                            linkedResource.ContentId = attachment.ContentId;
+
+                            if (!string.IsNullOrWhiteSpace(attachment.ContentType))
+                            {
+                                linkedResource.ContentType.MediaType = attachment.ContentType;
+                            }
+
+                            _logger.LogDebug("Added inline attachment with CID: {ContentId}", attachment.ContentId);
+                        }
+                        else
+                        {
+                            // ✅ REGULAR ATTACHMENT
+                            var mimeAttachment = bodyBuilder.Attachments.Add(
+                                attachment.FileName,
+                                memoryStream
+                            );
+
+                            if (!string.IsNullOrWhiteSpace(attachment.ContentType))
+                            {
+                                mimeAttachment.ContentType.MediaType = attachment.ContentType;
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(attachment.ContentId))
+                            {
+                                mimeAttachment.ContentId = attachment.ContentId;
+                            }
+
+                            _logger.LogDebug("Added regular attachment: {FileName}", attachment.FileName);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to process attachment {FileName}", attachment.FileName);
+                    }
+                }
+            }
+
+            // Add custom headers if supported
+            if (emailModel.CustomHeaders?.Any() == true)
+            {
+                foreach (var header in emailModel.CustomHeaders)
+                {
+                    try
+                    {
+                        message.Headers.Add(header.Key, header.Value);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to add custom header: {Key}={Value}", header.Key, header.Value);
+                    }
+                }
+            }
+
+            // Add delivery and read receipts if supported
+            if (emailModel.RequestDeliveryNotification)
+            {
+                message.Headers.Add("Return-Receipt-To", mailSettings["SenderEmail"]);
+                message.Headers.Add("Disposition-Notification-To", mailSettings["SenderEmail"]);
+            }
+
+            if (emailModel.RequestReadReceipt)
+            {
+                message.Headers.Add("Read-Receipt-To", mailSettings["SenderEmail"]);
+            }
+
+            // 🎯 CRITICAL: Set the message body using BodyBuilder
+            message.Body = bodyBuilder.ToMessageBody();
+
+            return message;
+        }
+
         /// <summary>
         /// Sends bulk emails with concurrency control and detailed results
         /// </summary>
@@ -128,153 +280,9 @@ namespace DT.APIs.Helpers
         #endregion
 
         #region Private Email Creation Methods
+ 
 
-        /// <summary>
-        /// Creates MimeMessage from EmailModel using MailKit
-        /// </summary>
-        private MimeMessage CreateMimeMessage(EmailModel emailModel, IConfigurationSection mailSettings)
-        {
-            var message = new MimeMessage();
-
-            // Set sender
-            message.From.Add(new MailboxAddress(
-                mailSettings["SenderName"],
-                mailSettings["SenderEmail"]));
-
-            // Set primary recipient
-            message.To.Add(new MailboxAddress(
-                emailModel.RecipientName ?? "",
-                emailModel.RecipientEmail));
-
-            // Add CC recipients (only valid emails)
-            if (emailModel.CC?.Any() == true)
-            {
-                foreach (var cc in emailModel.CC.Where(IsValidEmail))
-                {
-                    try
-                    {
-                        message.Cc.Add(MailboxAddress.Parse(cc));
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to add CC recipient: {CC}", cc);
-                    }
-                }
-            }
-
-            // Add BCC recipients (only valid emails)
-            if (emailModel.BCC?.Any() == true)
-            {
-                foreach (var bcc in emailModel.BCC.Where(IsValidEmail))
-                {
-                    try
-                    {
-                        message.Bcc.Add(MailboxAddress.Parse(bcc));
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to add BCC recipient: {BCC}", bcc);
-                    }
-                }
-            }
-
-            // Set reply-to
-            if (!string.IsNullOrWhiteSpace(emailModel.ReplyTo) && IsValidEmail(emailModel.ReplyTo))
-            {
-                message.ReplyTo.Add(MailboxAddress.Parse(emailModel.ReplyTo));
-            }
-
-            // Set subject
-            message.Subject = emailModel.Subject;
-
-            // Convert priority (maintain compatibility with System.Net.Mail)
-            message.Priority = ConvertPriority(emailModel.Priority);
-
-            // Add professional email headers for better deliverability
-            AddProfessionalHeaders(message, mailSettings);
-
-            // Add custom headers
-            if (emailModel.CustomHeaders?.Any() == true)
-            {
-                foreach (var header in emailModel.CustomHeaders)
-                {
-                    try
-                    {
-                        message.Headers.Add(header.Key, header.Value);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to add custom header: {Key}={Value}", header.Key, header.Value);
-                    }
-                }
-            }
-
-            // Add delivery and read receipts
-            if (emailModel.RequestDeliveryNotification)
-            {
-                message.Headers.Add("Return-Receipt-To", mailSettings["SenderEmail"]);
-            }
-
-            if (emailModel.RequestReadReceipt)
-            {
-                message.Headers.Add("Disposition-Notification-To", mailSettings["SenderEmail"]);
-            }
-
-            // Create message body with mobile optimization
-            message.Body = CreateMessageBody(emailModel);
-
-            return message;
-        }
-
-        /// <summary>
-        /// Creates message body with proper MIME structure and mobile optimization
-        /// </summary>
-        private MimeEntity CreateMessageBody(EmailModel emailModel)
-        {
-            if (emailModel.Attachments?.Any() != true)
-            {
-                // Simple message without attachments
-                return emailModel.IsBodyHtml
-                    ? new TextPart(TextFormat.Html) { Text = OptimizeHtmlForEmailClients(emailModel.Body) }
-                    : new TextPart(TextFormat.Plain) { Text = emailModel.Body };
-            }
-
-            // Complex message with attachments
-            var multipart = new Multipart("mixed");
-
-            // Add text/HTML part
-            if (emailModel.IsBodyHtml)
-            {
-                var htmlPart = CreateHtmlPartWithInlineImages(emailModel);
-                multipart.Add(htmlPart);
-            }
-            else
-            {
-                multipart.Add(new TextPart(TextFormat.Plain) { Text = emailModel.Body });
-            }
-
-            // Add regular attachments (non-inline)
-            foreach (var attachment in emailModel.Attachments.Where(a => !a.IsInline))
-            {
-                try
-                {
-                    var fileBytes = Convert.FromBase64String(attachment.Content);
-                    var mimePart = new MimePart(attachment.ContentType ?? "application/octet-stream")
-                    {
-                        Content = new MimeContent(new MemoryStream(fileBytes)),
-                        ContentDisposition = new ContentDisposition("attachment"),
-                        FileName = attachment.FileName
-                    };
-                    multipart.Add(mimePart);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to process attachment {FileName}", attachment.FileName);
-                }
-            }
-
-            return multipart;
-        }
+         
 
         /// <summary>
         /// Creates HTML part with inline images using proper multipart/related structure
@@ -320,23 +328,7 @@ namespace DT.APIs.Helpers
 
         #region Professional Email Headers and Mobile Optimization
 
-        /// <summary>
-        /// Adds professional email headers for better deliverability and client compatibility
-        /// </summary>
-        private void AddProfessionalHeaders(MimeMessage message, IConfigurationSection mailSettings)
-        {
-            // Professional email identification
-            message.Headers.Add("X-Mailer", "DT APIs Professional Email System v2.0");
-            message.Headers.Add("X-Message-Source", "DT-API-System");
-            message.Headers.Add("X-Auto-Response-Suppress", "DR, OOF, AutoReply");
-
-            // Generate proper Message-ID for email threading
-            var domain = mailSettings["SenderEmail"]?.Split('@')[1] ?? "stc.com.sa";
-            message.MessageId = MimeUtils.GenerateMessageId(domain);
-
-            // Prevent auto-forwarding loops
-            message.Headers.Add("X-Auto-Forward-Count", "0");
-        }
+        
 
         /// <summary>
         /// Optimizes HTML content for mobile email clients and cross-client compatibility
@@ -806,18 +798,7 @@ namespace DT.APIs.Helpers
 
         #region Utility Methods
 
-        /// <summary>
-        /// Converts System.Net.Mail.MailPriority to MimeKit.MessagePriority
-        /// </summary>
-        private MessagePriority ConvertPriority(System.Net.Mail.MailPriority priority)
-        {
-            return priority switch
-            {
-                System.Net.Mail.MailPriority.Low => MessagePriority.NonUrgent,
-                System.Net.Mail.MailPriority.High => MessagePriority.Urgent,
-                _ => MessagePriority.Normal
-            };
-        }
+       
 
         /// <summary>
         /// Validates email address using MailboxAddress (more robust than regex)
