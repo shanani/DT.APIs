@@ -1,17 +1,92 @@
-<Project Sdk="Microsoft.NET.Sdk.Worker">
+﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
 
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <UserSecretsId>dotnet-DT.EmailWorker-e7b25e77-a406-4ac6-8348-2b0cd5223710</UserSecretsId>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<UserSecretsId>dotnet-DT.EmailWorker-e7b25e77-a406-4ac6-8348-2b0cd5223710</UserSecretsId>
+		<ServiceName>DT.EmailWorker</ServiceName>
+		<ServiceDisplayName>DT Email Worker Service</ServiceDisplayName>
+		<ServiceDescription>Enterprise Email Processing Service for Digital Transformation projects</ServiceDescription>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
-  </ItemGroup>
+	<ItemGroup>
+		<!-- Email Service Dependencies (copied from proven DT.APIs) -->
+		<PackageReference Include="HtmlAgilityPack" Version="1.12.1" />
+		<PackageReference Include="MailKit" Version="4.3.0" />
+		<PackageReference Include="MimeKit" Version="4.3.0" />
 
-  <ItemGroup>
-    <Folder Include="test\" />
-  </ItemGroup>
+		<!-- Database Dependencies -->
+		<PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.10" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.10" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.10">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+
+		<!-- Core Worker Dependencies -->
+		<PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+		<PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+		<PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Configuration" Version="8.0.0" />
+
+		<!-- Health Monitoring -->
+		<PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="8.0.0" />
+
+		<!-- JSON Processing -->
+		<PackageReference Include="System.Text.Json" Version="8.0.0" />
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+
+		<!-- Performance Monitoring -->
+		<PackageReference Include="System.Diagnostics.PerformanceCounter" Version="8.0.0" />
+
+		<!-- Logging (Optional: NLog integration) -->
+		<PackageReference Include="NLog" Version="5.2.7" />
+		<PackageReference Include="NLog.Extensions.Logging" Version="5.3.7" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- Folder Structure for Organization -->
+		<Folder Include="Data\Migrations\" />
+		<Folder Include="Models\Entities\" />
+		<Folder Include="Models\DTOs\" />
+		<Folder Include="Models\Enums\" />
+		<Folder Include="Services\Interfaces\" />
+		<Folder Include="Services\Implementations\" />
+		<Folder Include="Workers\" />
+		<Folder Include="Core\Configuration\" />
+		<Folder Include="Core\Engines\" />
+		<Folder Include="Core\Utilities\" />
+		<Folder Include="Core\Extensions\" />
+		<Folder Include="Repositories\Interfaces\" />
+		<Folder Include="Repositories\Implementations\" />
+		<Folder Include="Monitoring\HealthChecks\" />
+		<Folder Include="Monitoring\Metrics\" />
+		<Folder Include="Monitoring\Alerts\" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- Configuration Files -->
+		<None Update="appsettings.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+		<None Update="appsettings.Production.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+		<None Update="appsettings.Development.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+		<None Update="nlog.config">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
+
 </Project>
