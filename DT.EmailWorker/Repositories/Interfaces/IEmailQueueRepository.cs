@@ -1,3 +1,4 @@
+using DT.EmailWorker.Models.DTOs;
 using DT.EmailWorker.Models.Entities;
 using DT.EmailWorker.Models.Enums;
 
@@ -90,16 +91,6 @@ namespace DT.EmailWorker.Repositories.Interfaces
         Task<List<EmailQueue>> GetEmailsByStatusAsync(EmailQueueStatus status, CancellationToken cancellationToken = default);
     }
 
-    /// <summary>
-    /// Queue statistics DTO
-    /// </summary>
-    public class QueueStatistics
-    {
-        public int PendingCount { get; set; }
-        public int ProcessingCount { get; set; }
-        public int SentCount { get; set; }
-        public int FailedCount { get; set; }
-        public int TotalCount { get; set; }
-        public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
-    }
+     
+    
 }

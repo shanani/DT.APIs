@@ -122,20 +122,5 @@ namespace DT.EmailWorker.Services.Interfaces
         /// <returns>True if scheduled successfully</returns>
         Task<bool> ScheduleEmailAsync(Guid queueId, DateTime scheduledFor);
     }
-
-    /// <summary>
-    /// Queue statistics DTO
-    /// </summary>
-    public class QueueStatistics
-    {
-        public int TotalQueued { get; set; }
-        public int TotalProcessing { get; set; }
-        public int TotalFailed { get; set; }
-        public int TotalScheduled { get; set; }
-        public int HighPriorityCount { get; set; }
-        public int NormalPriorityCount { get; set; }
-        public int LowPriorityCount { get; set; }
-        public DateTime OldestQueuedEmail { get; set; }
-        public double AverageQueueTimeHours { get; set; }
-    }
+ 
 }

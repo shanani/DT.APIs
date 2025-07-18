@@ -34,5 +34,14 @@
         /// When statistics were last updated
         /// </summary>
         public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
+        public int TotalQueued { get; internal set; }
+        public int TotalProcessing { get; internal set; }
+        public int TotalFailed { get; internal set; }
+        public int HighPriorityCount { get; internal set; }
+        public int NormalPriorityCount { get; internal set; }
+        public int LowPriorityCount { get; internal set; }
+        public int TotalScheduled { get; internal set; }
+        public DateTime OldestQueuedEmail { get; internal set; }
+        public double AverageQueueTimeHours { get; internal set; }
     }
 }

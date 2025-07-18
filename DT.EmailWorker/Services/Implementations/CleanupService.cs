@@ -618,15 +618,6 @@ namespace DT.EmailWorker.Services.Implementations
     }
 
     /// <summary>
-    /// Disk space analysis result
+    /// Disk space analysis result - REMOVED DUPLICATE - this should be in ICleanupService.cs
     /// </summary>
-    public class DiskSpaceAnalysis
-    {
-        public long FreeDiskSpaceBytes { get; set; }
-        public long TotalDiskSpaceBytes { get; set; }
-        public long DatabaseSizeBytes { get; set; }
-        public long EstimatedReclaimableBytes { get; set; }
-        public double FreeSpacePercent { get; set; }
-        public bool DiskSpaceHealthy { get; set; }
-    }
 }

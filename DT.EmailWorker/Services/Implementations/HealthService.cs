@@ -589,9 +589,5 @@ namespace DT.EmailWorker.Services.Implementations
         }
     }
 
-    // Simple queue statistics for internal use
-    internal class QueueStatistics
-    {
-        public int TotalQueued { get; set; }
-    }
+    
 }

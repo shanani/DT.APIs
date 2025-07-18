@@ -210,7 +210,7 @@ namespace DT.EmailWorker.Services.Implementations
                     TemplateId = emailRequest.TemplateId,
                     TemplateData = emailRequest.TemplateData,
                     RequiresTemplateProcessing = emailRequest.RequiresTemplateProcessing,
-                    Attachments = JsonSerializer.Serialize(emailRequest.Attachments ?? new List<AttachmentData>()),
+                    Attachments = emailRequest.Attachments, // Already a JSON string
                     HasEmbeddedImages = emailRequest.HasEmbeddedImages,
                     ScheduledFor = emailRequest.ScheduledFor,
                     IsScheduled = emailRequest.IsScheduled,
@@ -250,7 +250,7 @@ namespace DT.EmailWorker.Services.Implementations
                     TemplateId = request.TemplateId,
                     TemplateData = request.TemplateData,
                     RequiresTemplateProcessing = request.RequiresTemplateProcessing,
-                    Attachments = JsonSerializer.Serialize(request.Attachments ?? new List<AttachmentData>()),
+                    Attachments = request.Attachments, // Already a JSON string
                     HasEmbeddedImages = request.HasEmbeddedImages,
                     ScheduledFor = request.ScheduledFor,
                     IsScheduled = request.IsScheduled,
@@ -308,13 +308,32 @@ namespace DT.EmailWorker.Services.Implementations
             {
                 var stats = new QueueStatistics
                 {
-                    TotalCount = await _context.EmailQueue.CountAsync(),
-                    PendingCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Queued),
-                    ProcessingCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Processing),
-                    SentCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Sent),
-                    FailedCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Failed),
-                    LastUpdated = DateTime.UtcNow
+                    TotalQueued = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Queued),
+                    TotalProcessing = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Processing),
+                    TotalFailed = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Failed),
+                    TotalScheduled = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Scheduled),
+                    HighPriorityCount = await _context.EmailQueue.CountAsync(e =>
+                        e.Priority == EmailPriority.High &&
+                        (e.Status == EmailQueueStatus.Queued || e.Status == EmailQueueStatus.Processing)),
+                    NormalPriorityCount = await _context.EmailQueue.CountAsync(e =>
+                        e.Priority == EmailPriority.Normal &&
+                        (e.Status == EmailQueueStatus.Queued || e.Status == EmailQueueStatus.Processing)),
+                    LowPriorityCount = await _context.EmailQueue.CountAsync(e =>
+                        e.Priority == EmailPriority.Low &&
+                        (e.Status == EmailQueueStatus.Queued || e.Status == EmailQueueStatus.Processing))
                 };
+
+                // Get oldest queued email
+                var oldestQueued = await _context.EmailQueue
+                    .Where(e => e.Status == EmailQueueStatus.Queued)
+                    .OrderBy(e => e.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                if (oldestQueued != null)
+                {
+                    stats.OldestQueuedEmail = oldestQueued.CreatedAt;
+                    stats.AverageQueueTimeHours = (DateTime.UtcNow - oldestQueued.CreatedAt).TotalHours;
+                }
 
                 return stats;
             }
@@ -451,20 +470,6 @@ namespace DT.EmailWorker.Services.Implementations
 
         private EmailProcessingRequest ConvertToProcessingRequest(EmailQueue queueItem)
         {
-            var attachments = new List<AttachmentData>();
-
-            if (!string.IsNullOrWhiteSpace(queueItem.Attachments))
-            {
-                try
-                {
-                    attachments = JsonSerializer.Deserialize<List<AttachmentData>>(queueItem.Attachments) ?? new List<AttachmentData>();
-                }
-                catch (JsonException ex)
-                {
-                    _logger.LogWarning(ex, "Failed to deserialize attachments for queue item {QueueId}", queueItem.QueueId);
-                }
-            }
-
             return new EmailProcessingRequest
             {
                 QueueId = queueItem.QueueId,
@@ -478,7 +483,7 @@ namespace DT.EmailWorker.Services.Implementations
                 TemplateId = queueItem.TemplateId,
                 TemplateData = queueItem.TemplateData,
                 RequiresTemplateProcessing = queueItem.RequiresTemplateProcessing,
-                Attachments = attachments,
+                Attachments = queueItem.Attachments, // This is already a JSON string
                 HasEmbeddedImages = queueItem.HasEmbeddedImages,
                 ScheduledFor = queueItem.ScheduledFor,
                 IsScheduled = queueItem.IsScheduled,
