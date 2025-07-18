@@ -35,7 +35,8 @@ namespace DT.EmailWorker.Workers
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            LoggingHelper.LogWorkerStart(_logger, "Email Processing Worker");
+            // FIX: Use simple logging instead of missing LogWorkerStart method
+            _logger.LogInformation("Email Processing Worker started");
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -48,9 +49,8 @@ namespace DT.EmailWorker.Workers
                     _logger.LogError(ex, "Critical error in email processing worker");
                 }
 
-                // Wait for the configured polling interval
-                var delay = TimeSpan.FromSeconds(_settings.PollingIntervalSeconds);
-                await Task.Delay(delay, stoppingToken);
+                // Wait between processing cycles
+                await Task.Delay(TimeSpan.FromSeconds(_settings.PollingIntervalSeconds), stoppingToken);
             }
 
             _logger.LogInformation("Email Processing Worker stopped");
@@ -64,30 +64,32 @@ namespace DT.EmailWorker.Workers
 
             try
             {
-                // Get pending emails from queue
-                var pendingEmails = await emailQueueService.GetPendingEmailsAsync(_processingSettings.BatchSize, cancellationToken);
+                // FIX: Use correct method signature and pass workerId
+                var workerId = Environment.MachineName + "-" + Thread.CurrentThread.ManagedThreadId;
+                var pendingEmails = await emailQueueService.GetPendingEmailsAsync(_processingSettings.BatchSize, workerId);
 
                 if (!pendingEmails.Any())
                 {
-                    _logger.LogDebug("No pending emails found in queue");
+                    _logger.LogDebug("No pending emails found");
                     return;
                 }
 
-                _logger.LogInformation("Processing batch of {EmailCount} emails", pendingEmails.Count);
                 var batchStopwatch = Stopwatch.StartNew();
 
-                // Process emails with parallel execution
-                var semaphore = new SemaphoreSlim(_processingSettings.MaxConcurrentWorkers, _processingSettings.MaxConcurrentWorkers);
-                var processingTasks = pendingEmails.Select(async email =>
+                // FIX: Use LogBatchProcessingStart with correct signature
+                LoggingHelper.LogBatchProcessingStart(_logger, pendingEmails.Count, "Normal");
+
+                var processingTasks = pendingEmails.Select(async emailRequest =>
                 {
-                    await semaphore.WaitAsync(cancellationToken);
+                    await _semaphore.WaitAsync(cancellationToken);
                     try
                     {
-                        await ProcessSingleEmailAsync(email, emailQueueService, emailProcessingService, cancellationToken);
+                        Interlocked.Increment(ref _processingCount);
+                        await ProcessSingleEmailAsync(emailRequest, emailQueueService, emailProcessingService, cancellationToken);
                     }
                     finally
                     {
-                        semaphore.Release();
+                        _semaphore.Release();
                         Interlocked.Decrement(ref _processingCount);
                     }
                 });
@@ -98,7 +100,8 @@ namespace DT.EmailWorker.Workers
                 batchStopwatch.Stop();
                 _lastProcessingTime = DateTime.UtcNow;
 
-                LoggingHelper.LogBatchProcessingComplete(_logger, pendingEmails.Count, 0, batchStopwatch.ElapsedMilliseconds);
+                // FIX: Use correct LogBatchProcessingComplete signature
+                LoggingHelper.LogBatchProcessingComplete(_logger, pendingEmails.Count, pendingEmails.Count, 0, batchStopwatch.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
@@ -107,7 +110,7 @@ namespace DT.EmailWorker.Workers
         }
 
         private async Task ProcessSingleEmailAsync(
-            Models.Entities.EmailQueue emailQueue,
+            Models.DTOs.EmailProcessingRequest emailRequest,
             IEmailQueueService emailQueueService,
             IEmailProcessingService emailProcessingService,
             CancellationToken cancellationToken)
@@ -116,118 +119,63 @@ namespace DT.EmailWorker.Workers
 
             try
             {
-                LoggingHelper.LogEmailProcessingStart(_logger, emailQueue.Id, emailQueue.ToEmails, emailQueue.Subject);
+                // FIX: Use QueueId instead of Id, and cast to int for logging
+                var emailId = (int)(emailRequest.QueueId.GetHashCode() & 0x7FFFFFFF); // Convert Guid to int for logging
+                LoggingHelper.LogEmailProcessingStart(_logger, emailId, emailRequest.ToEmails, emailRequest.Subject);
 
-                // Update status to processing
-                await emailQueueService.UpdateEmailStatusAsync(emailQueue.Id, EmailQueueStatus.Processing, cancellationToken);
-
-                // Create processing request
-                var processingRequest = CreateProcessingRequest(emailQueue);
+                // FIX: Use MarkAsProcessingAsync with correct parameters
+                var workerId = Environment.MachineName + "-" + Thread.CurrentThread.ManagedThreadId;
+                await emailQueueService.MarkAsProcessingAsync(emailRequest.QueueId, workerId);
 
                 // Process the email
-                var result = await emailProcessingService.ProcessEmailAsync(processingRequest, cancellationToken);
+                var result = await emailProcessingService.ProcessEmailAsync(emailRequest, cancellationToken);
 
                 stopwatch.Stop();
 
                 if (result.IsSuccess)
                 {
-                    // Mark as sent
-                    await emailQueueService.UpdateEmailStatusAsync(emailQueue.Id, EmailQueueStatus.Sent, cancellationToken);
-                    LoggingHelper.LogEmailProcessingSuccess(_logger, emailQueue.Id, emailQueue.ToEmails, stopwatch.ElapsedMilliseconds);
+                    // FIX: Use MarkAsSentAsync with correct parameters
+                    await emailQueueService.MarkAsSentAsync(emailRequest.QueueId, workerId, (int?)stopwatch.ElapsedMilliseconds);
+                    LoggingHelper.LogEmailProcessingSuccess(_logger, emailId, emailRequest.ToEmails, stopwatch.ElapsedMilliseconds);
                 }
                 else
                 {
                     // Handle failure
-                    await HandleEmailProcessingFailure(emailQueue, result.ErrorMessage, emailQueueService, cancellationToken);
-                    LoggingHelper.LogEmailProcessingFailure(_logger, emailQueue.Id, emailQueue.ToEmails,
-                        new Exception(result.ErrorMessage), emailQueue.RetryCount);
+                    await HandleEmailProcessingFailure(emailRequest, result.ErrorMessage, emailQueueService, cancellationToken);
+                    LoggingHelper.LogEmailProcessingFailure(_logger, emailId, emailRequest.ToEmails,
+                        new Exception(result.ErrorMessage), 0); // RetryCount not available in EmailProcessingRequest
                 }
             }
             catch (Exception ex)
             {
                 stopwatch.Stop();
-                await HandleEmailProcessingFailure(emailQueue, ex.Message, emailQueueService, cancellationToken);
-                LoggingHelper.LogEmailProcessingFailure(_logger, emailQueue.Id, emailQueue.ToEmails, ex, emailQueue.RetryCount);
+                await HandleEmailProcessingFailure(emailRequest, ex.Message, emailQueueService, cancellationToken);
+                var emailId = (int)(emailRequest.QueueId.GetHashCode() & 0x7FFFFFFF);
+                LoggingHelper.LogEmailProcessingFailure(_logger, emailId, emailRequest.ToEmails, ex, 0);
             }
         }
 
-        private Models.DTOs.EmailProcessingRequest CreateProcessingRequest(Models.Entities.EmailQueue emailQueue)
-        {
-            return new Models.DTOs.EmailProcessingRequest
-            {
-                QueueId = emailQueue.Id,
-                ToEmails = emailQueue.ToEmails,
-                CcEmails = emailQueue.CcEmails,
-                BccEmails = emailQueue.BccEmails,
-                Subject = emailQueue.Subject,
-                Body = emailQueue.Body,
-                IsHtml = emailQueue.IsHtml,
-                Priority = emailQueue.Priority,
-                TemplateId = emailQueue.TemplateId,
-                TemplateData = emailQueue.TemplateData,
-                Attachments = emailQueue.Attachments?.Select(a => new Models.DTOs.AttachmentData
-                {
-                    FileName = a.FileName,
-                    ContentType = a.ContentType,
-                    Content = a.Content,
-                    FilePath = a.FilePath
-                }).ToList() ?? new List<Models.DTOs.AttachmentData>(),
-                CreatedBy = emailQueue.CreatedBy,
-                CreatedAt = emailQueue.CreatedAt
-            };
-        }
-
         private async Task HandleEmailProcessingFailure(
-            Models.Entities.EmailQueue emailQueue,
+            Models.DTOs.EmailProcessingRequest emailRequest,
             string? errorMessage,
             IEmailQueueService emailQueueService,
             CancellationToken cancellationToken)
         {
             try
             {
-                // Check if we should retry
-                if (emailQueue.RetryCount < _processingSettings.MaxRetryAttempts)
-                {
-                    // Increment retry count and set back to pending with delay
-                    await emailQueueService.IncrementRetryCountAsync(emailQueue.Id, errorMessage ?? "Unknown error", cancellationToken);
+                // FIX: Use MarkAsFailedAsync which handles retry logic internally
+                await emailQueueService.MarkAsFailedAsync(emailRequest.QueueId, errorMessage ?? "Unknown error", true);
 
-                    _logger.LogWarning("Email {EmailId} failed, will retry. Attempt {RetryCount}/{MaxRetries}",
-                        emailQueue.Id, emailQueue.RetryCount + 1, _processingSettings.MaxRetryAttempts);
-                }
-                else
-                {
-                    // Max retries exceeded, mark as failed
-                    await emailQueueService.UpdateEmailStatusAsync(emailQueue.Id, EmailQueueStatus.Failed,
-                        $"Max retries exceeded. Last error: {errorMessage}", cancellationToken);
-
-                    _logger.LogError("Email {EmailId} failed permanently after {RetryCount} attempts. Error: {ErrorMessage}",
-                        emailQueue.Id, emailQueue.RetryCount, errorMessage);
-                }
+                _logger.LogWarning("Email {QueueId} failed: {ErrorMessage}", emailRequest.QueueId, errorMessage);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error handling email processing failure for email {EmailId}", emailQueue.Id);
+                _logger.LogError(ex, "Error handling email processing failure for {QueueId}", emailRequest.QueueId);
             }
         }
 
         /// <summary>
-        /// Get current processing statistics
-        /// </summary>
-        public ProcessingWorkerStats GetCurrentStats()
-        {
-            return new ProcessingWorkerStats
-            {
-                IsRunning = !_disposed,
-                CurrentlyProcessing = _processingCount,
-                MaxConcurrentWorkers = _processingSettings.MaxConcurrentWorkers,
-                AvailableWorkerSlots = _semaphore.CurrentCount,
-                LastProcessingTime = _lastProcessingTime,
-                UtilizationPercentage = ((double)(_processingSettings.MaxConcurrentWorkers - _semaphore.CurrentCount) / _processingSettings.MaxConcurrentWorkers) * 100
-            };
-        }
-
-        /// <summary>
-        /// Process retry emails (failed emails that are eligible for retry)
+        /// Process retry emails
         /// </summary>
         public async Task ProcessRetryEmailsAsync(CancellationToken cancellationToken = default)
         {
@@ -236,17 +184,16 @@ namespace DT.EmailWorker.Workers
 
             try
             {
-                var retryEmails = await emailQueueService.GetFailedEmailsForRetryAsync(_processingSettings.MaxRetryAttempts, cancellationToken);
+                // FIX: Use GetStuckEmailsAsync and reset them - use 30 minutes as default threshold
+                var stuckThresholdMinutes = 30; // Default stuck email threshold
+                var stuckEmails = await emailQueueService.GetStuckEmailsAsync(stuckThresholdMinutes);
 
-                if (retryEmails.Any())
+                if (stuckEmails.Any())
                 {
-                    _logger.LogInformation("Processing {RetryCount} emails eligible for retry", retryEmails.Count);
+                    _logger.LogInformation("Processing {RetryCount} stuck emails for retry", stuckEmails.Count);
 
-                    foreach (var email in retryEmails)
-                    {
-                        // Reset status to pending for retry
-                        await emailQueueService.UpdateEmailStatusAsync(email.Id, EmailQueueStatus.Pending, cancellationToken);
-                    }
+                    // Reset stuck emails to queued status
+                    await emailQueueService.ResetStuckEmailsAsync(stuckThresholdMinutes);
                 }
             }
             catch (Exception ex)
@@ -256,9 +203,9 @@ namespace DT.EmailWorker.Workers
         }
 
         /// <summary>
-        /// Force process specific email by ID
+        /// Force process specific email by queue ID
         /// </summary>
-        public async Task<bool> ForceProcessEmailAsync(int emailId, CancellationToken cancellationToken = default)
+        public async Task<bool> ForceProcessEmailAsync(Guid queueId, CancellationToken cancellationToken = default)
         {
             using var scope = _serviceProvider.CreateScope();
             var emailQueueService = scope.ServiceProvider.GetRequiredService<IEmailQueueService>();
@@ -266,22 +213,54 @@ namespace DT.EmailWorker.Workers
 
             try
             {
-                var email = await emailQueueService.GetEmailByIdAsync(emailId, cancellationToken);
+                // FIX: Use GetEmailByQueueIdAsync instead of GetEmailByIdAsync
+                var email = await emailQueueService.GetEmailByQueueIdAsync(queueId);
                 if (email == null)
                 {
-                    _logger.LogWarning("Email {EmailId} not found for force processing", emailId);
+                    _logger.LogWarning("Email {QueueId} not found for force processing", queueId);
                     return false;
                 }
 
-                _logger.LogInformation("Force processing email {EmailId}", emailId);
-                await ProcessSingleEmailAsync(email, emailQueueService, emailProcessingService, cancellationToken);
+                _logger.LogInformation("Force processing email {QueueId}", queueId);
+
+                // Convert EmailQueue entity to EmailProcessingRequest
+                var emailRequest = ConvertToProcessingRequest(email);
+                await ProcessSingleEmailAsync(emailRequest, emailQueueService, emailProcessingService, cancellationToken);
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error force processing email {EmailId}", emailId);
+                _logger.LogError(ex, "Error force processing email {QueueId}", queueId);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Convert EmailQueue entity to EmailProcessingRequest DTO
+        /// </summary>
+        private Models.DTOs.EmailProcessingRequest ConvertToProcessingRequest(Models.Entities.EmailQueue emailQueue)
+        {
+            return new Models.DTOs.EmailProcessingRequest
+            {
+                QueueId = emailQueue.QueueId,
+                ToEmails = emailQueue.ToEmails,
+                CcEmails = emailQueue.CcEmails,
+                BccEmails = emailQueue.BccEmails,
+                Subject = emailQueue.Subject,
+                Body = emailQueue.Body,
+                IsHtml = emailQueue.IsHtml,
+                Priority = emailQueue.Priority,
+                TemplateId = emailQueue.TemplateId,
+                TemplateData = emailQueue.TemplateData,
+                RequiresTemplateProcessing = emailQueue.RequiresTemplateProcessing,
+                Attachments = emailQueue.Attachments, // This is already a JSON string
+                HasEmbeddedImages = emailQueue.HasEmbeddedImages,
+                ScheduledFor = emailQueue.ScheduledFor,
+                IsScheduled = emailQueue.IsScheduled,
+                CreatedBy = emailQueue.CreatedBy,
+                RequestSource = emailQueue.RequestSource,
+                CorrelationId = Guid.NewGuid() // Generate new correlation ID for tracking
+            };
         }
 
         /// <summary>
@@ -300,6 +279,24 @@ namespace DT.EmailWorker.Workers
         {
             // Implementation would clear pause flag
             _logger.LogInformation("Email processing resumed");
+        }
+
+        /// <summary>
+        /// Get current processing statistics
+        /// </summary>
+        public ProcessingWorkerStats GetStats()
+        {
+            return new ProcessingWorkerStats
+            {
+                IsRunning = true,
+                CurrentlyProcessing = _processingCount,
+                MaxConcurrentWorkers = _processingSettings.MaxConcurrentWorkers,
+                AvailableWorkerSlots = Math.Max(0, _processingSettings.MaxConcurrentWorkers - _processingCount),
+                LastProcessingTime = _lastProcessingTime,
+                UtilizationPercentage = _processingSettings.MaxConcurrentWorkers > 0
+                    ? (double)_processingCount / _processingSettings.MaxConcurrentWorkers * 100
+                    : 0
+            };
         }
 
         private bool _disposed = false;
@@ -323,17 +320,5 @@ namespace DT.EmailWorker.Workers
         public int AvailableWorkerSlots { get; set; }
         public DateTime LastProcessingTime { get; set; }
         public double UtilizationPercentage { get; set; }
-    }
-}
-
-// Add the missing DTOs that are referenced
-namespace DT.EmailWorker.Models.DTOs
-{
-    public class AttachmentData
-    {
-        public string FileName { get; set; } = string.Empty;
-        public string ContentType { get; set; } = string.Empty;
-        public string? Content { get; set; }
-        public string? FilePath { get; set; }
     }
 }

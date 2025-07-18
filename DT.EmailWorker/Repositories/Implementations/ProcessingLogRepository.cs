@@ -3,6 +3,7 @@ using DT.EmailWorker.Models.Entities;
 using DT.EmailWorker.Repositories.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.RegularExpressions;
 
 namespace DT.EmailWorker.Repositories.Implementations
 {
@@ -37,28 +38,33 @@ namespace DT.EmailWorker.Repositories.Implementations
             }
         }
 
+        // FIX: Updated method signature and property mapping to match ProcessingLog entity
         public async Task<ProcessingLog> AddLogAsync(LogLevel level, string message, string? details = null,
             int? emailId = null, string? operationType = null, CancellationToken cancellationToken = default)
         {
             var log = new ProcessingLog
             {
-                Level = level,
+                LogLevel = level, // FIX: Use LogLevel instead of Level
+                Category = operationType ?? "General", // FIX: Map operationType to Category
                 Message = message,
-                Details = details,
-                EmailId = emailId,
-                OperationType = operationType ?? "General",
+                Exception = details, // FIX: Map details to Exception property
+                ContextData = emailId?.ToString(), // FIX: Store emailId in ContextData as string
+                ProcessingStep = operationType, // FIX: Also store in ProcessingStep
                 CreatedAt = DateTime.UtcNow
             };
 
             return await AddAsync(log, cancellationToken);
         }
 
+        // FIX: This method needs to be changed since ProcessingLog doesn't have EmailId
+        // We'll search by ContextData containing the emailId
         public async Task<List<ProcessingLog>> GetByEmailIdAsync(int emailId, CancellationToken cancellationToken = default)
         {
             try
             {
+                var emailIdString = emailId.ToString();
                 return await _context.ProcessingLogs
-                    .Where(l => l.EmailId == emailId)
+                    .Where(l => l.ContextData != null && l.ContextData.Contains(emailIdString))
                     .OrderBy(l => l.CreatedAt)
                     .ToListAsync(cancellationToken);
             }
@@ -90,7 +96,7 @@ namespace DT.EmailWorker.Repositories.Implementations
             try
             {
                 return await _context.ProcessingLogs
-                    .Where(l => l.Level == level)
+                    .Where(l => l.LogLevel == level) // FIX: Use LogLevel instead of Level
                     .OrderByDescending(l => l.CreatedAt)
                     .Skip((pageNumber - 1) * pageSize)
                     .Take(pageSize)
@@ -108,7 +114,7 @@ namespace DT.EmailWorker.Repositories.Implementations
             try
             {
                 return await _context.ProcessingLogs
-                    .Where(l => l.OperationType == operationType)
+                    .Where(l => l.Category == operationType) // FIX: Use Category instead of OperationType
                     .OrderByDescending(l => l.CreatedAt)
                     .ToListAsync(cancellationToken);
             }
@@ -149,7 +155,7 @@ namespace DT.EmailWorker.Repositories.Implementations
                 var cutoffDate = DateTime.UtcNow.AddHours(-hoursBack);
 
                 return await _context.ProcessingLogs
-                    .Where(l => l.CreatedAt >= cutoffDate && l.Level == LogLevel.Error)
+                    .Where(l => l.CreatedAt >= cutoffDate && l.LogLevel == LogLevel.Error) // FIX: Use LogLevel
                     .OrderByDescending(l => l.CreatedAt)
                     .ToListAsync(cancellationToken);
             }
@@ -169,8 +175,17 @@ namespace DT.EmailWorker.Repositories.Implementations
                     .ToListAsync(cancellationToken);
 
                 var totalOperations = logs.Count;
-                var failedOperations = logs.Count(l => l.Level == LogLevel.Error);
+                var failedOperations = logs.Count(l => l.LogLevel == LogLevel.Error); // FIX: Use LogLevel
                 var successfulOperations = totalOperations - failedOperations;
+
+                var processingTimes = new List<double>();
+                foreach (var log in logs)
+                {
+                    if (TryExtractProcessingTime(log.Message, out double timeMs))
+                    {
+                        processingTimes.Add(timeMs);
+                    }
+                }
 
                 var metrics = new ProcessingMetrics
                 {
@@ -178,34 +193,14 @@ namespace DT.EmailWorker.Repositories.Implementations
                     SuccessfulOperations = successfulOperations,
                     FailedOperations = failedOperations,
                     SuccessRate = totalOperations > 0 ? (double)successfulOperations / totalOperations * 100 : 0,
-                    FromDate = fromDate,
-                    ToDate = toDate,
-                    OperationCounts = logs
-                        .GroupBy(l => l.OperationType)
+                    AverageProcessingTimeMs = processingTimes.Any() ? processingTimes.Average() : 0,
+                    OperationCounts = logs.GroupBy(l => l.Category) // FIX: Use Category instead of OperationType
+                        .ToDictionary(g => g.Key ?? "Unknown", g => g.Count()),
+                    LogLevelCounts = logs.GroupBy(l => l.LogLevel) // FIX: Use LogLevel
                         .ToDictionary(g => g.Key, g => g.Count()),
-                    LogLevelCounts = logs
-                        .GroupBy(l => l.Level)
-                        .ToDictionary(g => g.Key, g => g.Count())
+                    FromDate = fromDate,
+                    ToDate = toDate
                 };
-
-                // Calculate average processing time if available
-                var processingTimeLogs = logs.Where(l => l.Details != null && l.Details.Contains("ms")).ToList();
-                if (processingTimeLogs.Any())
-                {
-                    var processingTimes = new List<double>();
-                    foreach (var log in processingTimeLogs)
-                    {
-                        if (TryExtractProcessingTime(log.Details!, out var time))
-                        {
-                            processingTimes.Add(time);
-                        }
-                    }
-
-                    if (processingTimes.Any())
-                    {
-                        metrics.AverageProcessingTimeMs = processingTimes.Average();
-                    }
-                }
 
                 return metrics;
             }
@@ -220,12 +215,10 @@ namespace DT.EmailWorker.Repositories.Implementations
         {
             try
             {
-                var lowerSearchTerm = searchTerm.ToLower();
-
                 return await _context.ProcessingLogs
-                    .Where(l => l.Message.ToLower().Contains(lowerSearchTerm) ||
-                               (l.Details != null && l.Details.ToLower().Contains(lowerSearchTerm)) ||
-                               l.OperationType.ToLower().Contains(lowerSearchTerm))
+                    .Where(l => l.Message.Contains(searchTerm) ||
+                               (l.Exception != null && l.Exception.Contains(searchTerm)) || // FIX: Use Exception instead of Details
+                               (l.Category != null && l.Category.Contains(searchTerm))) // FIX: Use Category instead of OperationType
                     .OrderByDescending(l => l.CreatedAt)
                     .Skip((pageNumber - 1) * pageSize)
                     .Take(pageSize)
@@ -233,18 +226,18 @@ namespace DT.EmailWorker.Repositories.Implementations
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to search processing logs with term {SearchTerm}", searchTerm);
+                _logger.LogError(ex, "Failed to search processing logs");
                 throw;
             }
         }
 
-        private static bool TryExtractProcessingTime(string details, out double timeMs)
+        private bool TryExtractProcessingTime(string message, out double timeMs)
         {
             timeMs = 0;
             try
             {
-                // Look for patterns like "123.45ms" or "processed in 567ms"
-                var match = System.Text.RegularExpressions.Regex.Match(details, @"(\d+\.?\d*)\s*ms");
+                // Look for patterns like "123ms", "45.67ms", etc.
+                var match = Regex.Match(message, @"(\d+(?:\.\d*)?)\s*ms");
                 if (match.Success && double.TryParse(match.Groups[1].Value, out timeMs))
                 {
                     return true;

@@ -196,7 +196,7 @@ namespace DT.EmailWorker.Monitoring.Alerts
         {
             try
             {
-                var emailQueue = new EmailQueue
+                var emailRequest = new Models.DTOs.EmailProcessingRequest
                 {
                     ToEmails = _settings.AlertEmail!,
                     Subject = FormatEmailSubject(alert),
@@ -209,12 +209,10 @@ namespace DT.EmailWorker.Monitoring.Alerts
                         _ => EmailPriority.Low
                     },
                     CreatedBy = "NotificationService",
-                    Status = EmailQueueStatus.Pending,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    RequestSource = "AlertNotification"
                 };
 
-                await _emailQueueService.AddEmailToQueueAsync(emailQueue);
+                await _emailQueueService.QueueEmailAsync(emailRequest);
                 _logger.LogDebug("Alert email queued for {AlertLevel} alert: {Title}", alert.Level, alert.Title);
             }
             catch (Exception ex)
@@ -231,7 +229,7 @@ namespace DT.EmailWorker.Monitoring.Alerts
                 var warningAlerts = alerts.Where(a => a.Level == AlertLevel.Warning).ToList();
                 var infoAlerts = alerts.Where(a => a.Level == AlertLevel.Info).ToList();
 
-                var emailQueue = new EmailQueue
+                var emailRequest = new Models.DTOs.EmailProcessingRequest
                 {
                     ToEmails = _settings.AlertEmail!,
                     Subject = FormatBatchEmailSubject(alerts),
@@ -239,12 +237,10 @@ namespace DT.EmailWorker.Monitoring.Alerts
                     IsHtml = true,
                     Priority = criticalAlerts.Any() ? EmailPriority.High : EmailPriority.Normal,
                     CreatedBy = "NotificationService",
-                    Status = EmailQueueStatus.Pending,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    RequestSource = "BatchAlertNotification"
                 };
 
-                await _emailQueueService.AddEmailToQueueAsync(emailQueue);
+                await _emailQueueService.QueueEmailAsync(emailRequest);
                 _logger.LogDebug("Batch alert email queued with {AlertCount} alerts", alerts.Count);
             }
             catch (Exception ex)

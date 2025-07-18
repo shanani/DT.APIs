@@ -100,7 +100,9 @@ namespace DT.EmailWorker.Services.Implementations
             }
         }
 
-        public async Task MarkAsSentAsync(Guid queueId, string workerId, int processingTimeMs)
+        // Replace your existing MarkAsSentAsync method with this corrected version:
+
+        public async Task MarkAsSentAsync(Guid queueId, string workerId, int? processingTimeMs = null)
         {
             try
             {
@@ -117,7 +119,7 @@ namespace DT.EmailWorker.Services.Implementations
                     await _context.SaveChangesAsync();
 
                     _logger.LogInformation("Email {QueueId} marked as sent by worker {WorkerId} in {ProcessingTime}ms",
-                        queueId, workerId, processingTimeMs);
+                        queueId, workerId, processingTimeMs ?? 0);
                 }
             }
             catch (Exception ex)

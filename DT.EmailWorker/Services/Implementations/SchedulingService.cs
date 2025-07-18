@@ -37,7 +37,7 @@ namespace DT.EmailWorker.Services.Implementations
                 await _context.SaveChangesAsync(cancellationToken);
 
                 _logger.LogInformation("Email scheduled for {SendTime} - ID: {ScheduledEmailId}",
-                    scheduledEmail.ScheduledSendTime, scheduledEmail.Id);
+                    scheduledEmail.NextRunTime, scheduledEmail.Id);
 
                 return scheduledEmail;
             }
@@ -55,8 +55,8 @@ namespace DT.EmailWorker.Services.Implementations
                 var now = DateTime.UtcNow;
 
                 return await _context.ScheduledEmails
-                    .Where(se => se.ScheduledSendTime <= now && !se.IsProcessed && !se.IsCancelled)
-                    .OrderBy(se => se.ScheduledSendTime)
+                    .Where(se => se.NextRunTime <= now && se.IsActive && (se.ExecutionCount == 0 || se.IsRecurring))
+                    .OrderBy(se => se.NextRunTime)
                     .ToListAsync(cancellationToken);
             }
             catch (Exception ex)
@@ -77,13 +77,13 @@ namespace DT.EmailWorker.Services.Implementations
                     return false;
                 }
 
-                if (scheduledEmail.IsProcessed)
+                if (scheduledEmail.ExecutionCount > 0 && !scheduledEmail.IsRecurring)
                 {
                     _logger.LogWarning("Cannot cancel already processed email - ID: {ScheduledEmailId}", scheduledEmailId);
                     return false;
                 }
 
-                scheduledEmail.IsCancelled = true;
+                scheduledEmail.IsActive = false;
                 scheduledEmail.UpdatedAt = DateTime.UtcNow;
 
                 await _context.SaveChangesAsync(cancellationToken);
@@ -109,14 +109,14 @@ namespace DT.EmailWorker.Services.Implementations
                     return false;
                 }
 
-                if (scheduledEmail.IsProcessed)
+                if (scheduledEmail.ExecutionCount > 0 && !scheduledEmail.IsRecurring)
                 {
                     _logger.LogWarning("Cannot reschedule already processed email - ID: {ScheduledEmailId}", scheduledEmailId);
                     return false;
                 }
 
-                var oldSendTime = scheduledEmail.ScheduledSendTime;
-                scheduledEmail.ScheduledSendTime = newSendTime;
+                var oldSendTime = scheduledEmail.NextRunTime;
+                scheduledEmail.NextRunTime = newSendTime;
                 scheduledEmail.UpdatedAt = DateTime.UtcNow;
 
                 await _context.SaveChangesAsync(cancellationToken);
@@ -137,8 +137,8 @@ namespace DT.EmailWorker.Services.Implementations
             try
             {
                 return await _context.ScheduledEmails
-                    .Where(se => se.ScheduledSendTime >= fromDate && se.ScheduledSendTime <= toDate)
-                    .OrderBy(se => se.ScheduledSendTime)
+                    .Where(se => se.NextRunTime >= fromDate && se.NextRunTime <= toDate)
+                    .OrderBy(se => se.NextRunTime)
                     .ToListAsync(cancellationToken);
             }
             catch (Exception ex)
@@ -161,8 +161,8 @@ namespace DT.EmailWorker.Services.Implementations
                 {
                     try
                     {
-                        // Create regular email queue item from scheduled email
-                        var queueItem = new EmailQueue
+                        // Create email processing request instead of EmailQueue entity
+                        var emailRequest = new Models.DTOs.EmailProcessingRequest
                         {
                             ToEmails = scheduledEmail.ToEmails,
                             CcEmails = scheduledEmail.CcEmails,
@@ -173,27 +173,43 @@ namespace DT.EmailWorker.Services.Implementations
                             Priority = scheduledEmail.Priority,
                             TemplateId = scheduledEmail.TemplateId,
                             TemplateData = scheduledEmail.TemplateData,
+                            Attachments = scheduledEmail.Attachments,
                             CreatedBy = "SchedulingService",
-                            Status = EmailQueueStatus.Pending,
-                            CreatedAt = DateTime.UtcNow,
-                            UpdatedAt = DateTime.UtcNow
+                            RequestSource = "ScheduledEmail"
                         };
 
-                        await _emailQueueService.AddEmailToQueueAsync(queueItem, cancellationToken);
+                        // Use the correct method name from IEmailQueueService
+                        await _emailQueueService.QueueEmailAsync(emailRequest);
 
-                        // Mark scheduled email as processed
-                        scheduledEmail.IsProcessed = true;
-                        scheduledEmail.ProcessedAt = DateTime.UtcNow;
+                        // Update scheduled email tracking with correct property names
+                        scheduledEmail.ExecutionCount++;
+                        scheduledEmail.LastExecutedAt = DateTime.UtcNow;
                         scheduledEmail.UpdatedAt = DateTime.UtcNow;
+
+                        // Handle recurring emails
+                        if (scheduledEmail.IsRecurring)
+                        {
+                            UpdateNextRunTime(scheduledEmail);
+                        }
+                        else
+                        {
+                            // Non-recurring emails become inactive after execution
+                            scheduledEmail.IsActive = false;
+                        }
 
                         processedCount++;
 
-                        _logger.LogDebug("Processed scheduled email - ID: {ScheduledEmailId}, Queue ID: {QueueId}",
-                            scheduledEmail.Id, queueItem.Id);
+                        _logger.LogDebug("Processed scheduled email - ID: {ScheduledEmailId}",
+                            scheduledEmail.Id);
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Failed to process scheduled email {ScheduledEmailId}", scheduledEmail.Id);
+
+                        // Update error tracking
+                        scheduledEmail.LastExecutionError = ex.Message;
+                        scheduledEmail.LastExecutionStatus = EmailQueueStatus.Failed;
+                        scheduledEmail.UpdatedAt = DateTime.UtcNow;
                     }
                 }
 
@@ -211,6 +227,40 @@ namespace DT.EmailWorker.Services.Implementations
             {
                 _logger.LogError(ex, "Failed to process due emails");
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Helper method to update next run time for recurring emails
+        /// </summary>
+        /// <param name="scheduledEmail">The scheduled email to update</param>
+        private void UpdateNextRunTime(ScheduledEmail scheduledEmail)
+        {
+            if (scheduledEmail.IntervalMinutes.HasValue)
+            {
+                scheduledEmail.NextRunTime = scheduledEmail.NextRunTime.AddMinutes(scheduledEmail.IntervalMinutes.Value);
+            }
+            else if (!string.IsNullOrEmpty(scheduledEmail.CronExpression))
+            {
+                // For now, implement a simple daily recurrence
+                // You can enhance this later with a proper cron expression parser
+                scheduledEmail.NextRunTime = scheduledEmail.NextRunTime.AddDays(1);
+            }
+            else
+            {
+                // Default to daily recurrence if no interval or cron expression is specified
+                scheduledEmail.NextRunTime = scheduledEmail.NextRunTime.AddDays(1);
+            }
+
+            // Check if we've reached the end date or max executions
+            if (scheduledEmail.EndDate.HasValue && scheduledEmail.NextRunTime > scheduledEmail.EndDate.Value)
+            {
+                scheduledEmail.IsActive = false;
+            }
+
+            if (scheduledEmail.MaxExecutions.HasValue && scheduledEmail.ExecutionCount >= scheduledEmail.MaxExecutions.Value)
+            {
+                scheduledEmail.IsActive = false;
             }
         }
     }

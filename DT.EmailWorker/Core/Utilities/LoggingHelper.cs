@@ -250,7 +250,25 @@ namespace DT.EmailWorker.Core.Utilities
 
             return $"{localPart[0]}***{localPart[^1]}{domainPart}";
         }
+        // <summary>
+        /// Log worker start
+        /// </summary>
+        /// <param name="logger">Logger instance</param>
+        /// <param name="workerName">Worker name</param>
+        public static void LogWorkerStart(ILogger logger, string workerName)
+        {
+            logger.LogInformation("{WorkerName} started", workerName);
+        }
 
+        /// <summary>
+        /// Log worker stop
+        /// </summary>
+        /// <param name="logger">Logger instance</param>
+        /// <param name="workerName">Worker name</param>
+        public static void LogWorkerStop(ILogger logger, string workerName)
+        {
+            logger.LogInformation("{WorkerName} stopped", workerName);
+        }
         /// <summary>
         /// Truncate subject for logging
         /// </summary>

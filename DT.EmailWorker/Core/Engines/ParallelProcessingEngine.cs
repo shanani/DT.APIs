@@ -50,6 +50,10 @@ namespace DT.EmailWorker.Core.Engines
             var successfulItems = new ConcurrentBag<T>();
             var failedItems = new ConcurrentBag<FailedItem<T>>();
 
+            // FIX: Use local variables for Interlocked operations instead of class properties
+            int successfulCount = 0;
+            int failedCount = 0;
+
             try
             {
                 var tasks = itemList.Select(async item =>
@@ -62,7 +66,7 @@ namespace DT.EmailWorker.Core.Engines
                         if (processingResult.IsSuccess)
                         {
                             successfulItems.Add(item);
-                            Interlocked.Increment(ref result.SuccessfulItems);
+                            Interlocked.Increment(ref successfulCount); // FIX: Use local variable
                         }
                         else
                         {
@@ -72,7 +76,7 @@ namespace DT.EmailWorker.Core.Engines
                                 ErrorMessage = processingResult.ErrorMessage ?? "Unknown error",
                                 Exception = processingResult.Exception
                             });
-                            Interlocked.Increment(ref result.FailedItems);
+                            Interlocked.Increment(ref failedCount); // FIX: Use local variable
                         }
                     }
                     catch (Exception ex)
@@ -84,7 +88,7 @@ namespace DT.EmailWorker.Core.Engines
                             ErrorMessage = ex.Message,
                             Exception = ex
                         });
-                        Interlocked.Increment(ref result.FailedItems);
+                        Interlocked.Increment(ref failedCount); // FIX: Use local variable
                     }
                     finally
                     {
@@ -95,6 +99,10 @@ namespace DT.EmailWorker.Core.Engines
                 await Task.WhenAll(tasks);
 
                 stopwatch.Stop();
+
+                // FIX: Set result properties from local variables
+                result.SuccessfulItems = successfulCount;
+                result.FailedItems = failedCount;
                 result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
                 result.EndTime = DateTime.UtcNow;
                 result.IsSuccess = result.FailedItems == 0;
@@ -149,8 +157,8 @@ namespace DT.EmailWorker.Core.Engines
 
             result.TotalBatches = batches.Count;
 
-            _logger.LogInformation("Starting batch processing of {TotalItems} items in {BatchCount} batches of size {BatchSize}",
-                itemList.Count, batches.Count, batchSize);
+            _logger.LogInformation("Starting batch processing of {TotalItems} items in {TotalBatches} batches of size {BatchSize}",
+                result.TotalItems, result.TotalBatches, batchSize);
 
             var stopwatch = Stopwatch.StartNew();
 
@@ -161,9 +169,6 @@ namespace DT.EmailWorker.Core.Engines
                     await _semaphore.WaitAsync(cancellationToken);
                     try
                     {
-                        _logger.LogDebug("Processing batch {BatchIndex}/{TotalBatches} with {BatchItemCount} items",
-                            batchIndex + 1, batches.Count, batch.Count);
-
                         var batchResult = await batchProcessor(batch, cancellationToken);
 
                         lock (result)

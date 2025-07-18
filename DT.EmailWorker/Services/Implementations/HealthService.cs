@@ -36,6 +36,9 @@ namespace DT.EmailWorker.Services.Implementations
             _serviceVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
         }
 
+
+
+
         public async Task UpdateServiceStatusAsync(ServiceHealthStatus status, Dictionary<string, object>? additionalInfo = null)
         {
             try
@@ -80,6 +83,17 @@ namespace DT.EmailWorker.Services.Implementations
                 _logger.LogError(ex, "Error updating service status");
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Get service health information (alias for GetServiceStatusAsync for backward compatibility)
+        /// </summary>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Service status DTO</returns>
+        public async Task<ServiceStatusDto> GetServiceHealthAsync(CancellationToken cancellationToken = default)
+        {
+            // This is just an alias that calls the existing GetServiceStatusAsync method
+            return await GetServiceStatusAsync();
         }
 
         public async Task<ServiceStatusDto> GetServiceStatusAsync()
