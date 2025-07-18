@@ -6,9 +6,19 @@ namespace DT.EmailWorker.Core.Configuration
     public class CleanupSettings
     {
         /// <summary>
+        /// Whether automatic cleanup is enabled
+        /// </summary>
+        public bool IsEnabled { get; set; } = true;
+
+        /// <summary>
         /// Number of days to retain data (default: 90 days)
         /// </summary>
         public int RetentionDays { get; set; } = 90;
+
+        /// <summary>
+        /// Time interval between cleanup operations (in hours)
+        /// </summary>
+        public int CleanupIntervalHours { get; set; } = 24;
 
         /// <summary>
         /// Maximum number of records to clean up in a single operation
@@ -16,9 +26,18 @@ namespace DT.EmailWorker.Core.Configuration
         public int MaxRecordsPerCleanup { get; set; } = 1000;
 
         /// <summary>
-        /// Whether automatic cleanup is enabled
+        /// Threshold percentage for aggressive cleanup (when disk usage exceeds this)
         /// </summary>
-        public bool EnableAutoCleanup { get; set; } = true;
+        public double AggressiveCleanupThresholdPercent { get; set; } = 85.0;
+
+        /// <summary>
+        /// Whether automatic cleanup is enabled (alias for IsEnabled for backward compatibility)
+        /// </summary>
+        public bool EnableAutoCleanup
+        {
+            get => IsEnabled;
+            set => IsEnabled = value;
+        }
 
         /// <summary>
         /// Path for storing backup files before cleanup
@@ -69,11 +88,6 @@ namespace DT.EmailWorker.Core.Configuration
         /// Whether to send cleanup reports via email
         /// </summary>
         public bool SendCleanupReports { get; set; } = true;
-
-        /// <summary>
-        /// Time interval between cleanup operations (in hours)
-        /// </summary>
-        public int CleanupIntervalHours { get; set; } = 24;
 
         /// <summary>
         /// Whether to perform aggressive cleanup (removes more data)

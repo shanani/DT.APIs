@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MimeKit;
 using System.Text.RegularExpressions;
+using System.Text.Json;
 
 namespace DT.EmailWorker.Services.Implementations
 {
@@ -28,9 +29,6 @@ namespace DT.EmailWorker.Services.Implementations
             _smtpSettings = smtpSettings.Value;
             _logger = logger;
         }
-
-
-
 
         public async Task<bool> SendEmailAsync(EmailProcessingRequest request)
         {
@@ -123,9 +121,10 @@ namespace DT.EmailWorker.Services.Implementations
 
         private async Task ConnectToSmtpAsync(SmtpClient client)
         {
-            // Connect to SMTP server
-            await client.ConnectAsync(_smtpSettings.Host, _smtpSettings.Port,
-                _smtpSettings.UseSsl ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls);
+            // Connect to SMTP server - FIXED: Use correct property names from SmtpSettings
+            await client.ConnectAsync(_smtpSettings.Server, _smtpSettings.Port,
+                _smtpSettings.UseSSL ? SecureSocketOptions.SslOnConnect :
+                _smtpSettings.UseTLS ? SecureSocketOptions.StartTls : SecureSocketOptions.None);
 
             // Authenticate if credentials are provided
             if (!string.IsNullOrWhiteSpace(_smtpSettings.Username) &&
@@ -139,14 +138,14 @@ namespace DT.EmailWorker.Services.Implementations
         {
             var message = new MimeMessage();
 
-            // From
-            if (!string.IsNullOrWhiteSpace(_smtpSettings.FromName))
+            // From - FIXED: Use correct property names from SmtpSettings
+            if (!string.IsNullOrWhiteSpace(_smtpSettings.SenderName))
             {
-                message.From.Add(new MailboxAddress(_smtpSettings.FromName, _smtpSettings.FromEmail));
+                message.From.Add(new MailboxAddress(_smtpSettings.SenderName, _smtpSettings.SenderEmail));
             }
             else
             {
-                message.From.Add(MailboxAddress.Parse(_smtpSettings.FromEmail));
+                message.From.Add(MailboxAddress.Parse(_smtpSettings.SenderEmail));
             }
 
             // To
@@ -197,35 +196,45 @@ namespace DT.EmailWorker.Services.Implementations
                 bodyBuilder.TextBody = request.Body;
             }
 
-            // Attachments
-            if (request.Attachments?.Any() == true)
+            // Attachments - FIXED: Parse JSON string to attachment objects
+            if (!string.IsNullOrWhiteSpace(request.Attachments))
             {
-                foreach (var attachment in request.Attachments)
+                try
                 {
-                    try
+                    var attachments = JsonSerializer.Deserialize<List<AttachmentData>>(request.Attachments);
+                    if (attachments?.Any() == true)
                     {
-                        if (!string.IsNullOrWhiteSpace(attachment.Content))
+                        foreach (var attachment in attachments)
                         {
-                            // Base64 content
-                            var bytes = Convert.FromBase64String(attachment.Content);
-                            bodyBuilder.Attachments.Add(attachment.FileName, bytes,
-                                ContentType.Parse(attachment.ContentType ?? "application/octet-stream"));
-                        }
-                        else if (!string.IsNullOrWhiteSpace(attachment.FilePath) && File.Exists(attachment.FilePath))
-                        {
-                            // File path
-                            bodyBuilder.Attachments.Add(attachment.FilePath);
+                            try
+                            {
+                                if (!string.IsNullOrWhiteSpace(attachment.Content))
+                                {
+                                    // Base64 content
+                                    var bytes = Convert.FromBase64String(attachment.Content);
+                                    bodyBuilder.Attachments.Add(attachment.FileName, bytes,
+                                        ContentType.Parse(attachment.ContentType ?? "application/octet-stream"));
+                                }
+                                else if (!string.IsNullOrWhiteSpace(attachment.FilePath) && File.Exists(attachment.FilePath))
+                                {
+                                    // File path
+                                    bodyBuilder.Attachments.Add(attachment.FilePath);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to add attachment {FileName}", attachment.FileName);
+                            }
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to add attachment {FileName}", attachment.FileName);
-                    }
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to parse attachments JSON");
                 }
             }
 
             message.Body = bodyBuilder.ToMessageBody();
-
             return message;
         }
     }

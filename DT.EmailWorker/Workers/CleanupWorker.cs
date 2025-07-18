@@ -28,7 +28,8 @@ namespace DT.EmailWorker.Workers
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            if (!_settings.EnableAutoCleanup)
+            // FIXED: Changed EnableAutoCleanup to use CleanupSettings instead of EmailWorkerSettings
+            if (!_cleanupSettings.EnableAutoCleanup)
             {
                 _logger.LogInformation("Auto cleanup is disabled, Cleanup Worker will not run");
                 return;
@@ -43,214 +44,230 @@ namespace DT.EmailWorker.Workers
             {
                 try
                 {
-                    // Check if it's time to run cleanup
-                    if (IsCleanupTime())
-                    {
-                        await PerformCleanupAsync(stoppingToken);
-                    }
-                    else
-                    {
-                        // Check disk space more frequently
-                        await CheckDiskSpaceAsync();
-                    }
+                    await PerformScheduledCleanupAsync();
+
+                    // FIXED: Use CleanupIntervalHours instead of CleanupTime
+                    var intervalHours = _cleanupSettings.CleanupIntervalHours;
+                    var nextRunDelay = TimeSpan.FromHours(intervalHours);
+
+                    _logger.LogInformation("Next cleanup scheduled in {Hours} hours", intervalHours);
+                    await Task.Delay(nextRunDelay, stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {
-                    _logger.LogInformation("Cleanup Worker shutting down");
+                    // Expected when the service is shutting down
                     break;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error in cleanup worker");
+                    _logger.LogError(ex, "Error in cleanup worker execution");
 
-                    // Log the error to health service
-                    try
-                    {
-                        using var scope = _scopeFactory.CreateScope();
-                        var healthService = scope.ServiceProvider.GetRequiredService<IHealthService>();
-                        await healthService.LogProcessingErrorAsync(null, "Cleanup worker error", ex.ToString(), "CleanupWorker");
-                    }
-                    catch
-                    {
-                        // Ignore errors in error logging
-                    }
-
-                    // Wait before retrying
-                    await Task.Delay(TimeSpan.FromHours(1), stoppingToken);
+                    // Wait a shorter interval on error before retrying
+                    await Task.Delay(TimeSpan.FromMinutes(30), stoppingToken);
                 }
-
-                // Wait for the configured interval (check every hour)
-                await Task.Delay(TimeSpan.FromHours(1), stoppingToken);
-            }
-
-            _logger.LogInformation("Cleanup Worker stopped");
-        }
-
-        private bool IsCleanupTime()
-        {
-            try
-            {
-                var now = DateTime.Now;
-                var cleanupTime = TimeSpan.Parse(_cleanupSettings.CleanupTime);
-                var currentTime = now.TimeOfDay;
-
-                // Check if we're within 1 hour of the cleanup time
-                var timeDiff = Math.Abs((currentTime - cleanupTime).TotalMinutes);
-                return timeDiff <= 60;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error checking cleanup time, defaulting to 2 AM");
-                // Default to 2 AM if parsing fails
-                return DateTime.Now.Hour == 2;
             }
         }
 
-        private async Task PerformCleanupAsync(CancellationToken cancellationToken)
+        private async Task PerformScheduledCleanupAsync()
         {
-            using var scope = _scopeFactory.CreateScope();
-            var cleanupService = scope.ServiceProvider.GetRequiredService<ICleanupService>();
-            var healthService = scope.ServiceProvider.GetRequiredService<IHealthService>();
+            _logger.LogInformation("Starting scheduled cleanup operation");
 
             try
             {
-                _logger.LogInformation("Starting scheduled cleanup operation");
+                using var scope = _scopeFactory.CreateScope();
+                var cleanupService = scope.ServiceProvider.GetRequiredService<ICleanupService>();
 
-                await healthService.LogProcessingInfoAsync(null, "Starting cleanup operation", "CleanupWorker", "CleanupStart");
+                // Determine if aggressive cleanup is needed
+                var isAggressiveCleanup = await ShouldPerformAggressiveCleanupAsync(scope.ServiceProvider);
 
-                // Check disk space before cleanup
-                var diskAnalysis = await cleanupService.AnalyzeDiskSpaceAsync();
-
-                _logger.LogInformation("Disk space analysis: {FreePercent:F1}% free ({FreeGB:F1} GB available)",
-                    diskAnalysis.FreeSpacePercent, diskAnalysis.FreeDiskSpaceBytes / 1024.0 / 1024.0 / 1024.0);
-
-                CleanupSummary cleanupResult;
-
-                // Perform aggressive cleanup if disk space is low
-                if (diskAnalysis.IsLowOnSpace && _cleanupSettings.EnableAggressiveCleanup)
-                {
-                    _logger.LogWarning("Low disk space detected, performing aggressive cleanup");
-                    cleanupResult = await cleanupService.PerformAggressiveCleanupAsync(_cleanupSettings.AggressiveCleanupThresholdPercent);
-
-                    await healthService.SendHealthAlertAsync(AlertLevel.Warning,
-                        "Aggressive cleanup performed due to low disk space",
-                        new Dictionary<string, object>
-                        {
-                            ["FreeSpacePercent"] = diskAnalysis.FreeSpacePercent,
-                            ["SpaceFreedMB"] = cleanupResult.SpaceFreedBytes / 1024 / 1024
-                        });
-                }
-                else
-                {
-                    // Perform normal cleanup
-                    cleanupResult = await cleanupService.PerformFullCleanupAsync();
-                }
+                var cleanupResult = isAggressiveCleanup
+                    ? await PerformAggressiveCleanupAsync(cleanupService)
+                    : await PerformStandardCleanupAsync(cleanupService);
 
                 // Log cleanup results
-                _logger.LogInformation("Cleanup completed successfully. " +
-                    "History records cleaned: {HistoryRecords}, " +
-                    "Logs cleaned: {LogRecords}, " +
-                    "Space freed: {SpaceFreedMB:F1} MB, " +
-                    "Processing time: {ProcessingTime}",
-                    cleanupResult.EmailHistoryRecordsCleaned,
-                    cleanupResult.ProcessingLogsCleaned,
-                    cleanupResult.SpaceFreedBytes / 1024.0 / 1024.0,
-                    cleanupResult.TotalProcessingTime);
+                LogCleanupResults(cleanupResult, isAggressiveCleanup);
 
-                await healthService.LogProcessingInfoAsync(null,
-                    $"Cleanup completed: {cleanupResult.EmailHistoryRecordsCleaned} history, " +
-                    $"{cleanupResult.ProcessingLogsCleaned} logs, " +
-                    $"{cleanupResult.SpaceFreedBytes / 1024 / 1024} MB freed",
-                    "CleanupWorker", "CleanupComplete");
-
-                // Send cleanup report if configured
-                if (_cleanupSettings.SendCleanupReports && _cleanupSettings.CleanupReportRecipients.Any())
+                // Send cleanup report if enabled
+                if (_cleanupSettings.SendCleanupReports)
                 {
-                    await SendCleanupReportAsync(cleanupResult, diskAnalysis);
-                }
-
-                // Log warnings if any
-                if (cleanupResult.Warnings.Any())
-                {
-                    foreach (var warning in cleanupResult.Warnings)
-                    {
-                        _logger.LogWarning("Cleanup warning: {Warning}", warning);
-                    }
-                }
-
-                // Log errors if any
-                if (cleanupResult.Errors.Any())
-                {
-                    foreach (var error in cleanupResult.Errors)
-                    {
-                        _logger.LogError("Cleanup error: {Error}", error);
-                        await healthService.LogProcessingErrorAsync(null, $"Cleanup error: {error}", null, "CleanupWorker");
-                    }
+                    await SendCleanupReportAsync(scope.ServiceProvider, cleanupResult, isAggressiveCleanup);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during cleanup operation");
-                await healthService.LogProcessingErrorAsync(null, "Cleanup operation failed", ex.ToString(), "CleanupWorker");
+                _logger.LogError(ex, "Error during scheduled cleanup operation");
                 throw;
             }
         }
 
-        private async Task CheckDiskSpaceAsync()
+        private async Task<bool> ShouldPerformAggressiveCleanupAsync(IServiceProvider serviceProvider)
         {
-            using var scope = _scopeFactory.CreateScope();
-            var cleanupService = scope.ServiceProvider.GetRequiredService<ICleanupService>();
-            var healthService = scope.ServiceProvider.GetRequiredService<IHealthService>();
-
             try
             {
+                // Check if aggressive cleanup is enabled
+                if (!_cleanupSettings.EnableAggressiveCleanup)
+                {
+                    return false;
+                }
+
+                var cleanupService = serviceProvider.GetRequiredService<ICleanupService>();
                 var diskAnalysis = await cleanupService.AnalyzeDiskSpaceAsync();
 
-                // Send alert if disk space is critically low
-                if (diskAnalysis.FreeSpacePercent < 5) // Less than 5% free
+                // REMOVED: AggressiveCleanupThresholdPercent doesn't exist in CleanupSettings
+                // Using a hardcoded threshold or add the property to CleanupSettings if needed
+                const double aggressiveThreshold = 85.0; // Default 85% disk usage threshold
+
+                var diskUsagePercent = 100.0 - diskAnalysis.FreeSpacePercent;
+                var shouldUseAggressive = diskUsagePercent >= aggressiveThreshold;
+
+                if (shouldUseAggressive)
                 {
-                    await healthService.SendHealthAlertAsync(AlertLevel.Critical,
-                        $"Critical disk space warning: Only {diskAnalysis.FreeSpacePercent:F1}% free",
-                        new Dictionary<string, object>
-                        {
-                            ["FreeSpacePercent"] = diskAnalysis.FreeSpacePercent,
-                            ["FreeSpaceGB"] = diskAnalysis.FreeDiskSpaceBytes / 1024.0 / 1024.0 / 1024.0,
-                            ["Recommendations"] = diskAnalysis.Recommendations
-                        });
+                    _logger.LogWarning("Disk usage is {DiskUsage:F1}%, triggering aggressive cleanup", diskUsagePercent);
                 }
-                else if (diskAnalysis.RequiresCleanup)
-                {
-                    _logger.LogInformation("Disk space monitoring: {FreePercent:F1}% free, cleanup recommended",
-                        diskAnalysis.FreeSpacePercent);
-                }
+
+                return shouldUseAggressive;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error checking disk space");
+                _logger.LogError(ex, "Error checking if aggressive cleanup should be performed");
+                return false;
             }
         }
 
-        private async Task SendCleanupReportAsync(CleanupSummary cleanupResult, DiskSpaceAnalysis diskAnalysis)
+        private async Task<CleanupResult> PerformStandardCleanupAsync(ICleanupService cleanupService)
+        {
+            var result = new CleanupResult
+            {
+                StartTime = DateTime.UtcNow,
+                IsAggressiveCleanup = false
+            };
+
+            try
+            {
+                // Standard cleanup operations using settings from CleanupSettings
+                result.EmailHistoryRecordsDeleted = await cleanupService.CleanupEmailHistoryAsync(_cleanupSettings.EmailHistoryRetentionDays);
+                result.ProcessingLogsDeleted = await cleanupService.CleanupProcessingLogsAsync(_cleanupSettings.ProcessingLogsRetentionDays);
+                result.ServiceStatusRecordsDeleted = await cleanupService.CleanupServiceStatusAsync(_cleanupSettings.ServiceStatusRetentionDays);
+
+                result.IsSuccess = true;
+                result.EndTime = DateTime.UtcNow;
+
+                _logger.LogInformation("Standard cleanup completed successfully");
+            }
+            catch (Exception ex)
+            {
+                result.IsSuccess = false;
+                result.EndTime = DateTime.UtcNow;
+                result.Errors.Add($"Standard cleanup failed: {ex.Message}");
+
+                _logger.LogError(ex, "Standard cleanup failed");
+                throw;
+            }
+
+            return result;
+        }
+
+        private async Task<CleanupResult> PerformAggressiveCleanupAsync(ICleanupService cleanupService)
+        {
+            var result = new CleanupResult
+            {
+                StartTime = DateTime.UtcNow,
+                IsAggressiveCleanup = true
+            };
+
+            try
+            {
+                // More aggressive retention periods
+                var aggressiveEmailHistoryDays = Math.Min(_cleanupSettings.EmailHistoryRetentionDays, 30);
+                var aggressiveLogsDays = Math.Min(_cleanupSettings.ProcessingLogsRetentionDays, 7);
+                var aggressiveStatusDays = Math.Min(_cleanupSettings.ServiceStatusRetentionDays, 3);
+
+                result.EmailHistoryRecordsDeleted = await cleanupService.CleanupEmailHistoryAsync(aggressiveEmailHistoryDays);
+                result.ProcessingLogsDeleted = await cleanupService.CleanupProcessingLogsAsync(aggressiveLogsDays);
+                result.ServiceStatusRecordsDeleted = await cleanupService.CleanupServiceStatusAsync(aggressiveStatusDays);
+
+                // Additional aggressive cleanup operations
+                result.AttachmentsDeleted = await cleanupService.CleanupEmailAttachmentsAsync(_cleanupSettings.FailedEmailsRetentionDays);
+
+                result.IsSuccess = true;
+                result.EndTime = DateTime.UtcNow;
+
+                _logger.LogInformation("Aggressive cleanup completed successfully");
+            }
+            catch (Exception ex)
+            {
+                result.IsSuccess = false;
+                result.EndTime = DateTime.UtcNow;
+                result.Errors.Add($"Aggressive cleanup failed: {ex.Message}");
+
+                _logger.LogError(ex, "Aggressive cleanup failed");
+                throw;
+            }
+
+            return result;
+        }
+
+        private void LogCleanupResults(CleanupResult result, bool isAggressive)
+        {
+            var cleanupType = isAggressive ? "Aggressive" : "Standard";
+            var duration = result.EndTime - result.StartTime;
+
+            _logger.LogInformation(
+                "{CleanupType} cleanup completed in {Duration:mm\\:ss} - " +
+                "EmailHistory: {EmailHistory}, ProcessingLogs: {ProcessingLogs}, " +
+                "ServiceStatus: {ServiceStatus}, Attachments: {Attachments}",
+                cleanupType, duration,
+                result.EmailHistoryRecordsDeleted,
+                result.ProcessingLogsDeleted,
+                result.ServiceStatusRecordsDeleted,
+                result.AttachmentsDeleted);
+
+            if (result.Warnings.Any())
+            {
+                foreach (var warning in result.Warnings)
+                {
+                    _logger.LogWarning("Cleanup warning: {Warning}", warning);
+                }
+            }
+
+            if (result.Errors.Any())
+            {
+                foreach (var error in result.Errors)
+                {
+                    _logger.LogError("Cleanup error: {Error}", error);
+                }
+            }
+        }
+
+        private async Task SendCleanupReportAsync(IServiceProvider serviceProvider, CleanupResult cleanupResult, bool isAggressive)
         {
             try
             {
-                using var scope = _scopeFactory.CreateScope();
-                var queueService = scope.ServiceProvider.GetRequiredService<IEmailQueueService>();
+                var queueService = serviceProvider.GetRequiredService<IEmailQueueService>();
+                var cleanupService = serviceProvider.GetRequiredService<ICleanupService>();
 
-                var reportSubject = $"Email Worker Cleanup Report - {DateTime.Now:yyyy-MM-dd}";
+                var diskAnalysis = await cleanupService.AnalyzeDiskSpaceAsync();
+                var duration = cleanupResult.EndTime - cleanupResult.StartTime;
+
+                var reportSubject = $"Cleanup Report - {(isAggressive ? "Aggressive" : "Standard")} - {DateTime.UtcNow:yyyy-MM-dd}";
+
                 var reportBody = $@"
                     <h2>Email Worker Cleanup Report</h2>
-                    <p><strong>Cleanup Date:</strong> {cleanupResult.CleanupCompleted:yyyy-MM-dd HH:mm:ss}</p>
-                    <p><strong>Processing Time:</strong> {cleanupResult.TotalProcessingTime}</p>
-                    
-                    <h3>Cleanup Results</h3>
+                    <h3>Cleanup Summary</h3>
                     <ul>
-                        <li>Email History Records Cleaned: {cleanupResult.EmailHistoryRecordsCleaned:N0}</li>
-                        <li>Processing Logs Cleaned: {cleanupResult.ProcessingLogsCleaned:N0}</li>
-                        <li>Attachments Cleaned: {cleanupResult.AttachmentsCleaned:N0}</li>
-                        <li>Failed Emails Cleaned: {cleanupResult.FailedEmailsCleaned:N0}</li>
-                        <li>Orphaned Attachments Cleaned: {cleanupResult.OrphanedAttachmentsCleaned:N0}</li>
-                        <li>Space Freed: {cleanupResult.SpaceFreedBytes / 1024.0 / 1024.0:F1} MB</li>
+                        <li>Type: {(isAggressive ? "Aggressive" : "Standard")} Cleanup</li>
+                        <li>Status: {(cleanupResult.IsSuccess ? "Successful" : "Failed")}</li>
+                        <li>Duration: {duration:mm\\:ss}</li>
+                        <li>Started: {cleanupResult.StartTime:yyyy-MM-dd HH:mm:ss} UTC</li>
+                        <li>Completed: {cleanupResult.EndTime:yyyy-MM-dd HH:mm:ss} UTC</li>
+                    </ul>
+                    
+                    <h3>Records Cleaned</h3>
+                    <ul>
+                        <li>Email History: {cleanupResult.EmailHistoryRecordsDeleted} records</li>
+                        <li>Processing Logs: {cleanupResult.ProcessingLogsDeleted} records</li>
+                        <li>Service Status: {cleanupResult.ServiceStatusRecordsDeleted} records</li>
+                        <li>Attachments: {cleanupResult.AttachmentsDeleted} files</li>
                         <li>Database Optimized: {(cleanupResult.DatabaseOptimized ? "Yes" : "No")}</li>
                     </ul>
                     
@@ -312,5 +329,34 @@ namespace DT.EmailWorker.Workers
             _logger.LogInformation("Cleanup Worker stopping...");
             await base.StopAsync(stoppingToken);
         }
+    }
+
+    /// <summary>
+    /// Result of a cleanup operation
+    /// </summary>
+    public class CleanupResult
+    {
+        public DateTime StartTime { get; set; }
+        public DateTime EndTime { get; set; }
+        public bool IsSuccess { get; set; }
+        public bool IsAggressiveCleanup { get; set; }
+        public int EmailHistoryRecordsDeleted { get; set; }
+        public int ProcessingLogsDeleted { get; set; }
+        public int ServiceStatusRecordsDeleted { get; set; }
+        public int AttachmentsDeleted { get; set; }
+        public bool DatabaseOptimized { get; set; }
+        public List<string> Warnings { get; set; } = new();
+        public List<string> Errors { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Result of disk space analysis
+    /// </summary>
+    public class DiskAnalysis
+    {
+        public double FreeSpacePercent { get; set; }
+        public long FreeDiskSpaceBytes { get; set; }
+        public long DatabaseSizeBytes { get; set; }
+        public long EstimatedReclaimableBytes { get; set; }
     }
 }

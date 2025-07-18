@@ -3,35 +3,35 @@ using DT.EmailWorker.Models.DTOs;
 namespace DT.EmailWorker.Services.Interfaces
 {
     /// <summary>
-    /// Service for SMTP email sending operations
+    /// SMTP service interface for sending emails
     /// </summary>
     public interface ISmtpService
     {
         /// <summary>
-        /// Send email using SMTP
+        /// Send a single email
         /// </summary>
         /// <param name="request">Email processing request</param>
-        /// <returns>True if email was sent successfully</returns>
+        /// <returns>True if successful</returns>
         Task<bool> SendEmailAsync(EmailProcessingRequest request);
+
+        /// <summary>
+        /// Send multiple emails in bulk
+        /// </summary>
+        /// <param name="requests">Collection of email requests</param>
+        /// <returns>Number of successfully sent emails</returns>
+        Task<int> SendBulkEmailsAsync(IEnumerable<EmailProcessingRequest> requests);
 
         /// <summary>
         /// Test SMTP connection
         /// </summary>
-        /// <returns>True if connection is successful</returns>
+        /// <returns>True if connection successful</returns>
         Task<bool> TestConnectionAsync();
-
-        /// <summary>
-        /// Send bulk emails efficiently
-        /// </summary>
-        /// <param name="requests">List of email requests</param>
-        /// <returns>Number of successfully sent emails</returns>
-        Task<int> SendBulkEmailsAsync(IEnumerable<EmailProcessingRequest> requests);
 
         /// <summary>
         /// Validate email address format
         /// </summary>
         /// <param name="email">Email address to validate</param>
-        /// <returns>True if email format is valid</returns>
+        /// <returns>True if valid</returns>
         bool IsValidEmail(string email);
     }
 }

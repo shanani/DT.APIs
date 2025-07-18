@@ -10,6 +10,20 @@ namespace DT.EmailWorker.Services.Interfaces
     public interface IEmailQueueService
     {
         /// <summary>
+        /// Queue an email for processing
+        /// </summary>
+        /// <param name="emailRequest">Email processing request</param>
+        /// <returns>Queue ID of the email</returns>
+        Task<Guid> QueueEmailAsync(EmailProcessingRequest emailRequest);
+
+        /// <summary>
+        /// Queue multiple emails for processing
+        /// </summary>
+        /// <param name="emailRequests">List of email processing requests</param>
+        /// <returns>List of queue IDs</returns>
+        Task<List<Guid>> QueueBulkEmailsAsync(List<EmailProcessingRequest> emailRequests);
+
+        /// <summary>
         /// Get pending emails from the queue for processing
         /// </summary>
         /// <param name="batchSize">Number of emails to retrieve</param>
@@ -39,7 +53,7 @@ namespace DT.EmailWorker.Services.Interfaces
         /// <param name="workerId">ID of the worker that processed the email</param>
         /// <param name="processingTimeMs">Processing time in milliseconds</param>
         /// <returns>Task</returns>
-        Task MarkAsSentAsync(Guid queueId, string workerId, int processingTimeMs);
+        Task MarkAsSentAsync(Guid queueId, string workerId, int? processingTimeMs = null);
 
         /// <summary>
         /// Mark an email as failed
@@ -51,31 +65,9 @@ namespace DT.EmailWorker.Services.Interfaces
         Task MarkAsFailedAsync(Guid queueId, string errorMessage, bool shouldRetry = true);
 
         /// <summary>
-        /// Get emails that need to be retried
-        /// </summary>
-        /// <param name="batchSize">Number of emails to retrieve</param>
-        /// <param name="maxRetryCount">Maximum retry count to consider</param>
-        /// <returns>List of emails to retry</returns>
-        Task<List<EmailProcessingRequest>> GetEmailsForRetryAsync(int batchSize, int maxRetryCount);
-
-        /// <summary>
-        /// Queue a new email for processing
-        /// </summary>
-        /// <param name="emailRequest">Email processing request</param>
-        /// <returns>Queue ID of the created email</returns>
-        Task<Guid> QueueEmailAsync(EmailProcessingRequest emailRequest);
-
-        /// <summary>
-        /// Queue multiple emails for processing
-        /// </summary>
-        /// <param name="emailRequests">List of email processing requests</param>
-        /// <returns>List of queue IDs</returns>
-        Task<List<Guid>> QueueBulkEmailsAsync(List<EmailProcessingRequest> emailRequests);
-
-        /// <summary>
         /// Cancel a queued email
         /// </summary>
-        /// <param name="queueId">Queue ID of the email to cancel</param>
+        /// <param name="queueId">Queue ID of the email</param>
         /// <returns>True if cancelled successfully</returns>
         Task<bool> CancelEmailAsync(Guid queueId);
 
@@ -122,5 +114,6 @@ namespace DT.EmailWorker.Services.Interfaces
         /// <returns>True if scheduled successfully</returns>
         Task<bool> ScheduleEmailAsync(Guid queueId, DateTime scheduledFor);
     }
- 
+
+   
 }

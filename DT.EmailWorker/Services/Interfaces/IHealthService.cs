@@ -25,6 +25,13 @@ namespace DT.EmailWorker.Services.Interfaces
         Task<ServiceStatusDto> GetServiceStatusAsync();
 
         /// <summary>
+        /// Get service health information (alias for GetServiceStatusAsync for backward compatibility)
+        /// </summary>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Service status DTO</returns>
+        Task<ServiceStatusDto> GetServiceHealthAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Get service status for a specific machine
         /// </summary>
         /// <param name="machineName">Machine name</param>

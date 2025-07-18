@@ -87,10 +87,17 @@ namespace DT.EmailWorker.Workers
             // Service Health Status
             try
             {
-                var healthStatus = await healthService.GetServiceHealthAsync(cancellationToken);
-                report.AppendLine($"Service Health: {healthStatus.HealthStatus}");
-                report.AppendLine($"Uptime: {healthStatus.Uptime}");
-                report.AppendLine($"Last Health Check: {healthStatus.LastHealthCheck:yyyy-MM-dd HH:mm:ss} UTC");
+                // FIXED: Changed GetServiceHealthAsync to GetServiceStatusAsync (which exists in the interface)
+                var healthStatus = await healthService.GetServiceStatusAsync();
+                report.AppendLine($"Service Health: {healthStatus.Status}");
+                report.AppendLine($"Last Heartbeat: {healthStatus.LastHeartbeat:yyyy-MM-dd HH:mm:ss} UTC");
+                report.AppendLine($"Queue Depth: {healthStatus.QueueDepth}");
+                report.AppendLine($"Emails Processed/Hour: {healthStatus.EmailsProcessedPerHour}");
+                report.AppendLine($"Error Rate: {healthStatus.ErrorRate:F2}%");
+
+                // Calculate uptime if possible
+                var uptime = DateTime.UtcNow - healthStatus.StartedAt;
+                report.AppendLine($"Uptime: {uptime.Days}d {uptime.Hours}h {uptime.Minutes}m");
                 report.AppendLine();
             }
             catch (Exception ex)
@@ -102,17 +109,19 @@ namespace DT.EmailWorker.Workers
             // Queue Statistics
             try
             {
-                var queueStats = await emailQueueService.GetQueueStatisticsAsync(cancellationToken);
+                // FIXED: Removed cancellationToken parameter as GetQueueStatisticsAsync doesn't accept it
+                var queueStats = await emailQueueService.GetQueueStatisticsAsync();
                 report.AppendLine("Queue Statistics:");
-                report.AppendLine($"  Pending Emails: {queueStats.PendingCount:N0}");
-                report.AppendLine($"  Processing Emails: {queueStats.ProcessingCount:N0}");
-                report.AppendLine($"  Sent Emails: {queueStats.SentCount:N0}");
-                report.AppendLine($"  Failed Emails: {queueStats.FailedCount:N0}");
-                report.AppendLine($"  Total Emails: {queueStats.TotalCount:N0}");
+                report.AppendLine($"  Queued Emails: {queueStats.TotalQueued:N0}");
+                report.AppendLine($"  Processing Emails: {queueStats.TotalProcessing:N0}");
+                report.AppendLine($"  Sent Emails: {queueStats.TotalSent:N0}");
+                report.AppendLine($"  Failed Emails: {queueStats.TotalFailed:N0}");
+                report.AppendLine($"  Scheduled Emails: {queueStats.TotalScheduled:N0}");
 
-                if (queueStats.TotalCount > 0)
+                var totalProcessed = queueStats.TotalSent + queueStats.TotalFailed;
+                if (totalProcessed > 0)
                 {
-                    var successRate = (double)queueStats.SentCount / queueStats.TotalCount * 100;
+                    var successRate = (double)queueStats.TotalSent / totalProcessed * 100;
                     report.AppendLine($"  Success Rate: {successRate:F2}%");
                 }
                 report.AppendLine();
@@ -126,16 +135,64 @@ namespace DT.EmailWorker.Workers
             // Performance Metrics
             try
             {
-                var metrics = await healthService.GetPerformanceMetricsAsync(cancellationToken);
+                // FIXED: Changed cancellationToken to 24 (hours parameter) as expected by the method
+                var metrics = await healthService.GetPerformanceMetricsAsync(24);
                 report.AppendLine("Performance Metrics (Last 24 Hours):");
-                report.AppendLine($"  Emails Processed: {metrics.EmailsProcessed:N0}");
+                report.AppendLine($"  Total Emails Processed: {metrics.TotalEmailsProcessed:N0}");
+                report.AppendLine($"  Total Emails Failed: {metrics.TotalEmailsFailed:N0}");
+                report.AppendLine($"  Success Rate: {metrics.SuccessRate:F2}%");
                 report.AppendLine($"  Average Processing Time: {metrics.AverageProcessingTimeMs:F2}ms");
-                report.AppendLine($"  Peak Processing Rate: {metrics.PeakProcessingRate:N0} emails/hour");
+                report.AppendLine($"  Peak Queue Depth: {metrics.PeakQueueDepth:N0}");
+                report.AppendLine($"  Average Queue Depth: {metrics.AverageQueueDepth:N0}");
+                report.AppendLine($"  Average Emails/Hour: {metrics.AverageEmailsPerHour:F1}");
                 report.AppendLine();
             }
             catch (Exception ex)
             {
                 report.AppendLine($"Performance Metrics: ERROR - {ex.Message}");
+                report.AppendLine();
+            }
+
+            // System Resource Usage
+            try
+            {
+                var resourceUsage = await healthService.GetResourceUsageAsync();
+                report.AppendLine("System Resource Usage:");
+                report.AppendLine($"  CPU Usage: {resourceUsage.CpuUsagePercent:F1}%");
+                report.AppendLine($"  Memory Usage: {resourceUsage.MemoryUsageMB:F1} MB ({resourceUsage.MemoryUsagePercent:F1}%)");
+                report.AppendLine($"  Disk Usage: {resourceUsage.DiskUsagePercent:F1}%");
+                report.AppendLine($"  Process Count: {resourceUsage.ProcessCount}");
+                report.AppendLine($"  Thread Count: {resourceUsage.ThreadCount}");
+                report.AppendLine();
+            }
+            catch (Exception ex)
+            {
+                report.AppendLine($"System Resource Usage: ERROR - {ex.Message}");
+                report.AppendLine();
+            }
+
+            // Recent Errors/Alerts
+            try
+            {
+                var unhealthyServices = await healthService.GetUnhealthyServicesAsync(10);
+                if (unhealthyServices.Any())
+                {
+                    report.AppendLine("Unhealthy Services:");
+                    foreach (var service in unhealthyServices)
+                    {
+                        report.AppendLine($"  {service.ServiceName} on {service.MachineName} - Last heartbeat: {service.LastHeartbeat:yyyy-MM-dd HH:mm:ss}");
+                    }
+                    report.AppendLine();
+                }
+                else
+                {
+                    report.AppendLine("All Services: Healthy");
+                    report.AppendLine();
+                }
+            }
+            catch (Exception ex)
+            {
+                report.AppendLine($"Service Health Check: ERROR - {ex.Message}");
                 report.AppendLine();
             }
 
@@ -160,7 +217,8 @@ namespace DT.EmailWorker.Workers
 
             try
             {
-                var emailQueue = new Models.Entities.EmailQueue
+                // Create email request instead of EmailQueue entity
+                var emailRequest = new Models.DTOs.EmailProcessingRequest
                 {
                     ToEmails = _settings.StatusReportEmail!,
                     Subject = $"DT.EmailWorker Status Report - {DateTime.UtcNow:yyyy-MM-dd}",
@@ -168,13 +226,12 @@ namespace DT.EmailWorker.Workers
                     IsHtml = true,
                     Priority = Models.Enums.EmailPriority.High,
                     CreatedBy = "StatusReportWorker",
-                    Status = Models.Enums.EmailQueueStatus.Pending,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    RequestSource = "StatusReport"
                 };
 
-                await emailQueueService.AddEmailToQueueAsync(emailQueue, cancellationToken);
-                _logger.LogInformation("Status report email queued to {Email}", _settings.StatusReportEmail);
+                // FIXED: Changed AddEmailToQueueAsync to QueueEmailAsync (which exists in the interface)
+                var queueId = await emailQueueService.QueueEmailAsync(emailRequest);
+                _logger.LogInformation("Status report email queued with ID {QueueId} to {Email}", queueId, _settings.StatusReportEmail);
             }
             catch (Exception ex)
             {
