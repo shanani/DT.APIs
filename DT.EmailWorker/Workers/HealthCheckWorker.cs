@@ -67,7 +67,7 @@ namespace DT.EmailWorker.Workers
                     await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
                 }
 
-                // FIXED: Use HealthCheckIntervalMinutes from EmailWorkerSettings
+                // Use HealthCheckIntervalMinutes from EmailWorkerSettings
                 await Task.Delay(TimeSpan.FromMinutes(_settings.HealthCheckIntervalMinutes), stoppingToken);
             }
 
@@ -91,7 +91,6 @@ namespace DT.EmailWorker.Workers
                 await healthService.UpdateServiceStatusAsync(healthResult.OverallStatus);
 
                 // Check for stuck emails and reset them
-                // FIXED: Use ProcessingSettings.MaxProcessingTimeMinutes instead of EmailWorkerSettings
                 var stuckCount = await queueService.ResetStuckEmailsAsync(_processingSettings.MaxProcessingTimeMinutes);
                 if (stuckCount > 0)
                 {
@@ -110,12 +109,12 @@ namespace DT.EmailWorker.Workers
                 var performanceMetrics = await healthService.GetPerformanceMetricsAsync(1); // Last hour
 
                 // Update detailed performance metrics
-                // FIXED: Use ProcessingSettings.MaxConcurrentWorkers instead of EmailWorkerSettings
                 await healthService.UpdatePerformanceMetricsAsync(new PerformanceMetrics
                 {
                     EmailsProcessedLastHour = performanceMetrics.TotalEmailsProcessed,
                     EmailsFailedLastHour = performanceMetrics.TotalEmailsFailed,
                     AverageProcessingTimeMs = performanceMetrics.AverageProcessingTimeMs,
+                    // FIXED: Use correct property names from QueueStatistics
                     CurrentQueueDepth = queueStats.TotalQueued,
                     ActiveWorkers = _processingSettings.MaxConcurrentWorkers
                 });
@@ -124,8 +123,8 @@ namespace DT.EmailWorker.Workers
                 if (healthResult.OverallStatus == ServiceHealthStatus.Healthy)
                 {
                     _logger.LogDebug("Health check completed - Service is healthy. Queue depth: {QueueDepth}, " +
-                        "Processing rate: {ProcessingRate}/hour",
-                        queueStats.TotalQueued, performanceMetrics.AverageEmailsPerHour);
+                        "Processing: {ProcessingCount}",
+                        queueStats.TotalQueued, queueStats.ProcessingCount);
                 }
                 else
                 {
@@ -141,7 +140,6 @@ namespace DT.EmailWorker.Workers
                             {
                                 ["QueueDepth"] = queueStats.TotalQueued,
                                 ["FailedComponents"] = healthResult.ComponentResults
-                                    // FIXED: Use HealthCheckResult.Status == HealthStatus.Healthy instead of IsHealthy
                                     .Where(r => r.Status != HealthStatus.Healthy)
                                     .Select(r => r.Description ?? "Unknown component")
                                     .ToList()
@@ -198,16 +196,17 @@ namespace DT.EmailWorker.Workers
                         new Dictionary<string, object>
                         {
                             ["QueueDepth"] = queueStats.TotalQueued,
-                            ["ProcessingCount"] = queueStats.TotalProcessing,
-                            ["FailedCount"] = queueStats.TotalFailed
+                            ["ProcessingCount"] = queueStats.ProcessingCount,
+                            ["FailedCount"] = queueStats.FailedCount
                         });
                 }
 
                 // Check for high failure rate
-                var totalProcessed = queueStats.TotalSent + queueStats.TotalFailed;
+                // FIXED: Use correct property names from QueueStatistics
+                var totalProcessed = queueStats.SentCount + queueStats.FailedCount;
                 if (totalProcessed > 0)
                 {
-                    var failureRate = (double)queueStats.TotalFailed / totalProcessed * 100;
+                    var failureRate = (double)queueStats.FailedCount / totalProcessed * 100;
                     if (failureRate > 10) // More than 10% failure rate
                     {
                         await healthService.SendHealthAlertAsync(AlertLevel.Warning,
@@ -215,21 +214,28 @@ namespace DT.EmailWorker.Workers
                             new Dictionary<string, object>
                             {
                                 ["FailureRate"] = failureRate,
-                                ["TotalFailed"] = queueStats.TotalFailed,
+                                ["TotalFailed"] = queueStats.FailedCount,
                                 ["TotalProcessed"] = totalProcessed
                             });
                     }
                 }
 
-                // Check for processing slowdown
-                if (queueStats.ProcessingRate < 10 && queueStats.TotalQueued > 100) // Less than 10 emails/hour with backlog
+                // Check for processing slowdown - calculate processing rate from available data
+                // FIXED: Calculate processing rate since it's not available as a property
+                var timeSinceLastUpdate = DateTime.UtcNow - queueStats.LastUpdated;
+                var processingRate = timeSinceLastUpdate.TotalHours > 0
+                    ? queueStats.ProcessingCount / timeSinceLastUpdate.TotalHours
+                    : 0;
+
+                if (processingRate < 10 && queueStats.TotalQueued > 100) // Less than 10 emails/hour with backlog
                 {
                     await healthService.SendHealthAlertAsync(AlertLevel.Warning,
-                        $"Processing slowdown detected: {queueStats.ProcessingRate:F1} emails/hour with {queueStats.TotalQueued} queued",
+                        $"Processing slowdown detected: {processingRate:F1} emails/hour with {queueStats.TotalQueued} queued",
                         new Dictionary<string, object>
                         {
-                            ["ProcessingRate"] = queueStats.ProcessingRate,
-                            ["QueueDepth"] = queueStats.TotalQueued
+                            ["ProcessingRate"] = processingRate,
+                            ["QueueDepth"] = queueStats.TotalQueued,
+                            ["ProcessingCount"] = queueStats.ProcessingCount
                         });
                 }
             }
