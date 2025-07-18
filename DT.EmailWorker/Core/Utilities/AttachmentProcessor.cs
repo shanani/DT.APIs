@@ -1,40 +1,42 @@
 using DT.EmailWorker.Models.Entities;
 using Microsoft.Extensions.Logging;
-using System.Text;
 
 namespace DT.EmailWorker.Core.Utilities
 {
     /// <summary>
-    /// Attachment processing utility class
+    /// Utility class for processing email attachments
     /// </summary>
     public class AttachmentProcessor
     {
         private readonly ILogger<AttachmentProcessor> _logger;
-        private const int MaxAttachmentSizeMB = 25;
+        private const int MaxAttachmentSizeMB = 25; // Default max size
         private const long MaxAttachmentSizeBytes = MaxAttachmentSizeMB * 1024 * 1024;
 
-        // Allowed MIME types for security
-        private static readonly HashSet<string> AllowedMimeTypes = new(StringComparer.OrdinalIgnoreCase)
+        private static readonly Dictionary<string, string> MimeTypeMappings = new()
         {
-            "application/pdf",
-            "application/msword",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/vnd.ms-excel",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.ms-powerpoint",
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "text/plain",
-            "text/csv",
-            "image/jpeg",
-            "image/png",
-            "image/gif",
-            "image/bmp",
-            "image/webp",
-            "application/zip",
-            "application/x-zip-compressed",
-            "application/json",
-            "application/xml",
-            "text/xml"
+            { ".pdf", "application/pdf" },
+            { ".doc", "application/msword" },
+            { ".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+            { ".xls", "application/vnd.ms-excel" },
+            { ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+            { ".ppt", "application/vnd.ms-powerpoint" },
+            { ".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
+            { ".txt", "text/plain" },
+            { ".rtf", "application/rtf" },
+            { ".zip", "application/zip" },
+            { ".rar", "application/x-rar-compressed" },
+            { ".7z", "application/x-7z-compressed" },
+            { ".jpg", "image/jpeg" },
+            { ".jpeg", "image/jpeg" },
+            { ".png", "image/png" },
+            { ".gif", "image/gif" },
+            { ".bmp", "image/bmp" },
+            { ".svg", "image/svg+xml" },
+            { ".mp3", "audio/mpeg" },
+            { ".wav", "audio/wav" },
+            { ".mp4", "video/mp4" },
+            { ".avi", "video/x-msvideo" },
+            { ".mov", "video/quicktime" }
         };
 
         public AttachmentProcessor(ILogger<AttachmentProcessor> logger)
@@ -46,249 +48,273 @@ namespace DT.EmailWorker.Core.Utilities
         /// Process and validate attachments
         /// </summary>
         /// <param name="attachments">List of attachments to process</param>
+        /// <param name="maxSizeMB">Maximum attachment size in MB</param>
         /// <returns>Processing result</returns>
-        public AttachmentProcessingResult ProcessAttachments(List<EmailAttachment>? attachments)
+        public async Task<AttachmentProcessingResult> ProcessAttachmentsAsync(
+            List<EmailAttachment> attachments,
+            int maxSizeMB = MaxAttachmentSizeMB)
         {
             var result = new AttachmentProcessingResult();
+            var maxSizeBytes = maxSizeMB * 1024 * 1024;
 
             if (attachments == null || !attachments.Any())
             {
-                result.IsValid = true;
+                result.IsSuccess = true;
                 return result;
             }
 
-            long totalSize = 0;
-            var validAttachments = new List<EmailAttachment>();
-            var errors = new List<string>();
+            _logger.LogDebug("Processing {Count} attachments", attachments.Count);
 
             foreach (var attachment in attachments)
             {
                 try
                 {
-                    var validationResult = ValidateAttachment(attachment);
-                    if (validationResult.IsValid)
+                    var validation = await ValidateAttachmentAsync(attachment, maxSizeBytes);
+                    result.ValidationResults.Add(validation);
+
+                    if (!validation.IsValid)
                     {
-                        totalSize += validationResult.SizeBytes;
-                        validAttachments.Add(attachment);
+                        result.HasErrors = true;
+                        continue;
                     }
-                    else
+
+                    // Process the attachment
+                    var processed = await ProcessSingleAttachmentAsync(attachment);
+                    if (processed != null)
                     {
-                        errors.AddRange(validationResult.Errors);
+                        result.ProcessedAttachments.Add(processed);
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to process attachment {FileName}", attachment.FileName);
-                    errors.Add($"Failed to process attachment {attachment.FileName}: {ex.Message}");
+                    result.HasErrors = true;
+                    result.ValidationResults.Add(new AttachmentValidationResult
+                    {
+                        FileName = attachment.FileName,
+                        IsValid = false,
+                        ErrorMessage = $"Processing error: {ex.Message}"
+                    });
                 }
             }
 
-            // Check total size limit
-            if (totalSize > MaxAttachmentSizeBytes)
-            {
-                errors.Add($"Total attachment size ({totalSize / 1024 / 1024:F1} MB) exceeds limit of {MaxAttachmentSizeMB} MB");
-                result.IsValid = false;
-            }
-            else
-            {
-                result.IsValid = errors.Count == 0;
-            }
+            result.IsSuccess = !result.HasErrors;
+            result.TotalSize = result.ProcessedAttachments.Sum(a => a.FileSize);
 
-            result.ValidAttachments = validAttachments;
-            result.TotalSizeBytes = totalSize;
-            result.Errors = errors;
+            _logger.LogDebug("Attachment processing completed. Success: {IsSuccess}, Count: {Count}, Total Size: {TotalSize} bytes",
+                result.IsSuccess, result.ProcessedAttachments.Count, result.TotalSize);
 
             return result;
         }
 
         /// <summary>
-        /// Validate individual attachment
+        /// Validate single attachment
         /// </summary>
         /// <param name="attachment">Attachment to validate</param>
+        /// <param name="maxSizeBytes">Maximum size in bytes</param>
         /// <returns>Validation result</returns>
-        public AttachmentValidationResult ValidateAttachment(EmailAttachment attachment)
+        public async Task<AttachmentValidationResult> ValidateAttachmentAsync(EmailAttachment attachment, long maxSizeBytes = MaxAttachmentSizeBytes)
         {
-            var result = new AttachmentValidationResult();
-            var errors = new List<string>();
+            var result = new AttachmentValidationResult
+            {
+                FileName = attachment.FileName,
+                IsValid = true
+            };
 
             try
             {
-                // Validate filename
+                // Validate file name
                 if (string.IsNullOrWhiteSpace(attachment.FileName))
                 {
-                    errors.Add("Attachment filename is required");
-                }
-                else if (attachment.FileName.Length > 255)
-                {
-                    errors.Add("Attachment filename is too long (max 255 characters)");
-                }
-                else if (ContainsInvalidFileNameCharacters(attachment.FileName))
-                {
-                    errors.Add("Attachment filename contains invalid characters");
+                    result.IsValid = false;
+                    result.ErrorMessage = "File name is required";
+                    return result;
                 }
 
-                // Validate content type
-                if (string.IsNullOrWhiteSpace(attachment.ContentType))
+                // Check for invalid characters
+                if (HasInvalidFileNameCharacters(attachment.FileName))
                 {
-                    attachment.ContentType = GetMimeTypeFromFileName(attachment.FileName);
+                    result.IsValid = false;
+                    result.ErrorMessage = "File name contains invalid characters";
+                    return result;
                 }
 
-                if (!AllowedMimeTypes.Contains(attachment.ContentType))
-                {
-                    errors.Add($"Attachment type '{attachment.ContentType}' is not allowed");
-                }
-
-                // Validate content
-                byte[] contentBytes = Array.Empty<byte>();
+                // Validate file size
                 if (!string.IsNullOrWhiteSpace(attachment.Content))
                 {
+                    // Base64 content
                     try
                     {
-                        contentBytes = Convert.FromBase64String(attachment.Content);
-                        result.SizeBytes = contentBytes.Length;
+                        var bytes = Convert.FromBase64String(attachment.Content);
+                        result.FileSizeBytes = bytes.Length;
+
+                        if (bytes.Length > maxSizeBytes)
+                        {
+                            result.IsValid = false;
+                            result.ErrorMessage = $"File size ({FormatFileSize(bytes.Length)}) exceeds maximum allowed size ({FormatFileSize(maxSizeBytes)})";
+                            return result;
+                        }
                     }
                     catch (FormatException)
                     {
-                        errors.Add("Attachment content is not valid Base64");
+                        result.IsValid = false;
+                        result.ErrorMessage = "Invalid Base64 content";
+                        return result;
                     }
                 }
                 else if (!string.IsNullOrWhiteSpace(attachment.FilePath))
                 {
-                    if (File.Exists(attachment.FilePath))
+                    // File path
+                    if (!File.Exists(attachment.FilePath))
                     {
-                        var fileInfo = new FileInfo(attachment.FilePath);
-                        result.SizeBytes = fileInfo.Length;
-                        contentBytes = File.ReadAllBytes(attachment.FilePath);
+                        result.IsValid = false;
+                        result.ErrorMessage = "File does not exist";
+                        return result;
                     }
-                    else
+
+                    var fileInfo = new FileInfo(attachment.FilePath);
+                    result.FileSizeBytes = fileInfo.Length;
+
+                    if (fileInfo.Length > maxSizeBytes)
                     {
-                        errors.Add($"Attachment file not found: {attachment.FilePath}");
+                        result.IsValid = false;
+                        result.ErrorMessage = $"File size ({FormatFileSize(fileInfo.Length)}) exceeds maximum allowed size ({FormatFileSize(maxSizeBytes)})";
+                        return result;
                     }
                 }
                 else
                 {
-                    errors.Add("Attachment must have either Content or FilePath");
+                    result.IsValid = false;
+                    result.ErrorMessage = "Either Content or FilePath must be provided";
+                    return result;
                 }
 
-                // Validate size
-                if (result.SizeBytes > MaxAttachmentSizeBytes)
+                // Validate content type
+                var contentType = DetermineContentType(attachment.FileName, attachment.ContentType);
+                if (string.IsNullOrWhiteSpace(contentType))
                 {
-                    errors.Add($"Attachment size ({result.SizeBytes / 1024 / 1024:F1} MB) exceeds limit of {MaxAttachmentSizeMB} MB");
+                    result.ErrorMessage = "Unknown file type";
+                    // Still valid, but with warning
                 }
 
-                // Additional security checks
-                if (contentBytes.Length > 0)
-                {
-                    if (IsExecutableFile(contentBytes, attachment.FileName))
-                    {
-                        errors.Add("Executable files are not allowed as attachments");
-                    }
-                }
-
-                result.IsValid = errors.Count == 0;
-                result.Errors = errors;
+                result.DetectedContentType = contentType;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error validating attachment {FileName}", attachment.FileName);
-                errors.Add($"Validation error: {ex.Message}");
+                _logger.LogError(ex, "Failed to validate attachment {FileName}", attachment.FileName);
                 result.IsValid = false;
-                result.Errors = errors;
+                result.ErrorMessage = $"Validation error: {ex.Message}";
             }
 
             return result;
         }
 
         /// <summary>
-        /// Convert file to Base64 string
+        /// Process single attachment
         /// </summary>
-        /// <param name="filePath">File path</param>
-        /// <returns>Base64 string</returns>
-        public async Task<string> ConvertFileToBase64Async(string filePath)
+        /// <param name="attachment">Attachment to process</param>
+        /// <returns>Processed attachment</returns>
+        private async Task<EmailAttachment> ProcessSingleAttachmentAsync(EmailAttachment attachment)
         {
-            try
+            // Ensure content type is set
+            if (string.IsNullOrWhiteSpace(attachment.ContentType))
             {
-                var bytes = await File.ReadAllBytesAsync(filePath);
-                return Convert.ToBase64String(bytes);
+                attachment.ContentType = DetermineContentType(attachment.FileName, null);
             }
-            catch (Exception ex)
+
+            // If file path is provided, convert to base64
+            if (!string.IsNullOrWhiteSpace(attachment.FilePath) && File.Exists(attachment.FilePath))
             {
-                _logger.LogError(ex, "Failed to convert file to Base64: {FilePath}", filePath);
-                throw;
+                var bytes = await File.ReadAllBytesAsync(attachment.FilePath);
+                attachment.Content = Convert.ToBase64String(bytes);
+                attachment.FileSize = bytes.Length;
+
+                // Clear file path for security
+                attachment.FilePath = null;
             }
+            else if (!string.IsNullOrWhiteSpace(attachment.Content))
+            {
+                var bytes = Convert.FromBase64String(attachment.Content);
+                attachment.FileSize = bytes.Length;
+            }
+
+            return attachment;
         }
 
         /// <summary>
-        /// Save Base64 content to file
+        /// Determine content type from file name and provided type
         /// </summary>
-        /// <param name="base64Content">Base64 content</param>
-        /// <param name="filePath">Target file path</param>
-        public async Task SaveBase64ToFileAsync(string base64Content, string filePath)
+        /// <param name="fileName">File name</param>
+        /// <param name="providedContentType">Provided content type</param>
+        /// <returns>Determined content type</returns>
+        public static string DetermineContentType(string fileName, string? providedContentType)
         {
-            try
+            // Use provided content type if valid
+            if (!string.IsNullOrWhiteSpace(providedContentType) && providedContentType.Contains("/"))
             {
-                var bytes = Convert.FromBase64String(base64Content);
-                await File.WriteAllBytesAsync(filePath, bytes);
+                return providedContentType;
             }
-            catch (Exception ex)
+
+            // Determine from file extension
+            var extension = Path.GetExtension(fileName)?.ToLowerInvariant();
+            if (!string.IsNullOrWhiteSpace(extension) && MimeTypeMappings.TryGetValue(extension, out var mimeType))
             {
-                _logger.LogError(ex, "Failed to save Base64 to file: {FilePath}", filePath);
-                throw;
+                return mimeType;
             }
+
+            return "application/octet-stream";
         }
 
-        private static bool ContainsInvalidFileNameCharacters(string fileName)
+        /// <summary>
+        /// Check if file name has invalid characters
+        /// </summary>
+        /// <param name="fileName">File name to check</param>
+        /// <returns>True if has invalid characters</returns>
+        private static bool HasInvalidFileNameCharacters(string fileName)
         {
             var invalidChars = Path.GetInvalidFileNameChars();
             return fileName.IndexOfAny(invalidChars) >= 0;
         }
 
-        private static string GetMimeTypeFromFileName(string fileName)
+        /// <summary>
+        /// Format file size for display
+        /// </summary>
+        /// <param name="sizeInBytes">Size in bytes</param>
+        /// <returns>Formatted size string</returns>
+        public static string FormatFileSize(long sizeInBytes)
         {
-            var extension = Path.GetExtension(fileName).ToLowerInvariant();
-            return extension switch
-            {
-                ".pdf" => "application/pdf",
-                ".doc" => "application/msword",
-                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                ".xls" => "application/vnd.ms-excel",
-                ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                ".ppt" => "application/vnd.ms-powerpoint",
-                ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                ".txt" => "text/plain",
-                ".csv" => "text/csv",
-                ".jpg" or ".jpeg" => "image/jpeg",
-                ".png" => "image/png",
-                ".gif" => "image/gif",
-                ".bmp" => "image/bmp",
-                ".webp" => "image/webp",
-                ".zip" => "application/zip",
-                ".json" => "application/json",
-                ".xml" => "application/xml",
-                _ => "application/octet-stream"
-            };
+            const long KB = 1024;
+            const long MB = KB * 1024;
+            const long GB = MB * 1024;
+
+            if (sizeInBytes >= GB)
+                return $"{sizeInBytes / (double)GB:F2} GB";
+            if (sizeInBytes >= MB)
+                return $"{sizeInBytes / (double)MB:F2} MB";
+            if (sizeInBytes >= KB)
+                return $"{sizeInBytes / (double)KB:F2} KB";
+
+            return $"{sizeInBytes} bytes";
         }
 
-        private static bool IsExecutableFile(byte[] content, string fileName)
+        /// <summary>
+        /// Get supported file extensions
+        /// </summary>
+        /// <returns>List of supported extensions</returns>
+        public static List<string> GetSupportedExtensions()
         {
-            // Check for common executable file signatures
-            if (content.Length < 4) return false;
+            return MimeTypeMappings.Keys.ToList();
+        }
 
-            // Check file extension
-            var extension = Path.GetExtension(fileName).ToLowerInvariant();
-            var executableExtensions = new[] { ".exe", ".bat", ".cmd", ".com", ".scr", ".pif", ".vbs", ".js" };
-            if (executableExtensions.Contains(extension))
-                return true;
-
-            // Check PE header (Windows executables)
-            if (content.Length >= 2 && content[0] == 0x4D && content[1] == 0x5A) // MZ header
-                return true;
-
-            // Check ELF header (Linux executables)
-            if (content.Length >= 4 && content[0] == 0x7F && content[1] == 0x45 && content[2] == 0x4C && content[3] == 0x46)
-                return true;
-
-            return false;
+        /// <summary>
+        /// Check if file extension is supported
+        /// </summary>
+        /// <param name="fileName">File name</param>
+        /// <returns>True if supported</returns>
+        public static bool IsSupportedFileType(string fileName)
+        {
+            var extension = Path.GetExtension(fileName)?.ToLowerInvariant();
+            return !string.IsNullOrWhiteSpace(extension) && MimeTypeMappings.ContainsKey(extension);
         }
     }
 
@@ -297,19 +323,22 @@ namespace DT.EmailWorker.Core.Utilities
     /// </summary>
     public class AttachmentProcessingResult
     {
-        public bool IsValid { get; set; }
-        public List<EmailAttachment> ValidAttachments { get; set; } = new();
-        public long TotalSizeBytes { get; set; }
-        public List<string> Errors { get; set; } = new();
+        public bool IsSuccess { get; set; }
+        public bool HasErrors { get; set; }
+        public long TotalSize { get; set; }
+        public List<EmailAttachment> ProcessedAttachments { get; set; } = new();
+        public List<AttachmentValidationResult> ValidationResults { get; set; } = new();
     }
 
     /// <summary>
-    /// Individual attachment validation result
+    /// Attachment validation result
     /// </summary>
     public class AttachmentValidationResult
     {
+        public string FileName { get; set; } = string.Empty;
         public bool IsValid { get; set; }
-        public long SizeBytes { get; set; }
-        public List<string> Errors { get; set; } = new();
+        public string? ErrorMessage { get; set; }
+        public long FileSizeBytes { get; set; }
+        public string? DetectedContentType { get; set; }
     }
 }

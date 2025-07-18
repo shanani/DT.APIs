@@ -1,4 +1,3 @@
-using DT.EmailWorker.Models.DTOs;
 using DT.EmailWorker.Models.Entities;
 
 namespace DT.EmailWorker.Services.Interfaces
@@ -9,143 +8,72 @@ namespace DT.EmailWorker.Services.Interfaces
     public interface ITemplateService
     {
         /// <summary>
-        /// Process template with placeholders to generate final email content
-        /// </summary>
-        /// <param name="templateId">Template ID</param>
-        /// <param name="placeholders">Dictionary of placeholder values</param>
-        /// <returns>Processed template data</returns>
-        Task<TemplateData> ProcessTemplateAsync(int templateId, Dictionary<string, string> placeholders);
-
-        /// <summary>
-        /// Process template directly with template content
-        /// </summary>
-        /// <param name="subjectTemplate">Subject template with placeholders</param>
-        /// <param name="bodyTemplate">Body template with placeholders</param>
-        /// <param name="placeholders">Dictionary of placeholder values</param>
-        /// <returns>Processed template data</returns>
-        Task<TemplateData> ProcessTemplateAsync(string subjectTemplate, string bodyTemplate, Dictionary<string, string> placeholders);
-
-        /// <summary>
         /// Get template by ID
         /// </summary>
         /// <param name="templateId">Template ID</param>
-        /// <returns>Email template or null if not found</returns>
-        Task<EmailTemplate?> GetTemplateAsync(int templateId);
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Email template or null</returns>
+        Task<EmailTemplate?> GetTemplateByIdAsync(int templateId, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Get template by name
         /// </summary>
         /// <param name="templateName">Template name</param>
-        /// <returns>Email template or null if not found</returns>
-        Task<EmailTemplate?> GetTemplateByNameAsync(string templateName);
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Email template or null</returns>
+        Task<EmailTemplate?> GetTemplateByNameAsync(string templateName, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Process template with data
+        /// </summary>
+        /// <param name="templateId">Template ID</param>
+        /// <param name="templateData">Template data for placeholder replacement</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Template processing result</returns>
+        Task<TemplateProcessingResult> ProcessTemplateAsync(int templateId, Dictionary<string, string> templateData, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Process template by name with data
+        /// </summary>
+        /// <param name="templateName">Template name</param>
+        /// <param name="templateData">Template data for placeholder replacement</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Template processing result</returns>
+        Task<TemplateProcessingResult> ProcessTemplateByNameAsync(string templateName, Dictionary<string, string> templateData, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Get all active templates
         /// </summary>
+        /// <param name="cancellationToken">Cancellation token</param>
         /// <returns>List of active templates</returns>
-        Task<List<EmailTemplate>> GetActiveTemplatesAsync();
+        Task<List<EmailTemplate>> GetActiveTemplatesAsync(CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Get templates by category
-        /// </summary>
-        /// <param name="category">Template category</param>
-        /// <returns>List of templates in the category</returns>
-        Task<List<EmailTemplate>> GetTemplatesByCategoryAsync(string category);
-
-        /// <summary>
-        /// Create a new template
+        /// Create new template
         /// </summary>
         /// <param name="template">Template to create</param>
-        /// <returns>Created template ID</returns>
-        Task<int> CreateTemplateAsync(EmailTemplate template);
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Created template</returns>
+        Task<EmailTemplate> CreateTemplateAsync(EmailTemplate template, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Update an existing template
+        /// Update existing template
         /// </summary>
         /// <param name="template">Template to update</param>
-        /// <returns>True if updated successfully</returns>
-        Task<bool> UpdateTemplateAsync(EmailTemplate template);
-
-        /// <summary>
-        /// Delete a template
-        /// </summary>
-        /// <param name="templateId">Template ID to delete</param>
-        /// <returns>True if deleted successfully</returns>
-        Task<bool> DeleteTemplateAsync(int templateId);
-
-        /// <summary>
-        /// Activate or deactivate a template
-        /// </summary>
-        /// <param name="templateId">Template ID</param>
-        /// <param name="isActive">Whether the template should be active</param>
-        /// <returns>True if updated successfully</returns>
-        Task<bool> SetTemplateActiveAsync(int templateId, bool isActive);
-
-        /// <summary>
-        /// Validate template syntax and placeholders
-        /// </summary>
-        /// <param name="subjectTemplate">Subject template to validate</param>
-        /// <param name="bodyTemplate">Body template to validate</param>
-        /// <returns>Validation result</returns>
-        Task<TemplateValidationResult> ValidateTemplateAsync(string subjectTemplate, string bodyTemplate);
-
-        /// <summary>
-        /// Extract placeholders from template content
-        /// </summary>
-        /// <param name="template">Template content</param>
-        /// <returns>List of placeholder names found</returns>
-        Task<List<string>> ExtractPlaceholdersAsync(string template);
-
-        /// <summary>
-        /// Process a simple string template with placeholders
-        /// </summary>
-        /// <param name="template">Template string with {placeholder} syntax</param>
-        /// <param name="placeholders">Dictionary of placeholder values</param>
-        /// <returns>Processed string</returns>
-        Task<string> ProcessStringTemplateAsync(string template, Dictionary<string, string> placeholders);
-
-        /// <summary>
-        /// Clone an existing template
-        /// </summary>
-        /// <param name="templateId">Template ID to clone</param>
-        /// <param name="newName">Name for the cloned template</param>
-        /// <param name="createdBy">User creating the clone</param>
-        /// <returns>ID of the cloned template</returns>
-        Task<int> CloneTemplateAsync(int templateId, string newName, string createdBy);
-
-        /// <summary>
-        /// Get template usage statistics
-        /// </summary>
-        /// <param name="templateId">Template ID</param>
-        /// <param name="days">Number of days to look back</param>
-        /// <returns>Usage statistics</returns>
-        Task<TemplateUsageStatistics> GetTemplateUsageAsync(int templateId, int days = 30);
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>Updated template</returns>
+        Task<EmailTemplate> UpdateTemplateAsync(EmailTemplate template, CancellationToken cancellationToken = default);
     }
 
     /// <summary>
-    /// Template validation result
+    /// Template processing result
     /// </summary>
-    public class TemplateValidationResult
+    public class TemplateProcessingResult
     {
-        public bool IsValid { get; set; }
-        public List<string> Errors { get; set; } = new List<string>();
-        public List<string> Warnings { get; set; } = new List<string>();
-        public List<string> Placeholders { get; set; } = new List<string>();
-        public int PlaceholderCount { get; set; }
-    }
-
-    /// <summary>
-    /// Template usage statistics
-    /// </summary>
-    public class TemplateUsageStatistics
-    {
-        public int TemplateId { get; set; }
-        public string TemplateName { get; set; } = string.Empty;
-        public int TimesUsed { get; set; }
-        public int SuccessfulSends { get; set; }
-        public int FailedSends { get; set; }
-        public DateTime LastUsed { get; set; }
-        public double SuccessRate { get; set; }
-        public double AverageProcessingTimeMs { get; set; }
+        public bool IsSuccess { get; set; }
+        public string ProcessedSubject { get; set; } = string.Empty;
+        public string ProcessedBody { get; set; } = string.Empty;
+        public string? ErrorMessage { get; set; }
+        public List<string> ValidationErrors { get; set; } = new();
     }
 }
