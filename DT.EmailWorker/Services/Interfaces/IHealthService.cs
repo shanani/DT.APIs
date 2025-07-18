@@ -1,6 +1,7 @@
 using DT.EmailWorker.Models.DTOs;
 using DT.EmailWorker.Models.Entities;
 using DT.EmailWorker.Models.Enums;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace DT.EmailWorker.Services.Interfaces
 {
@@ -125,20 +126,7 @@ namespace DT.EmailWorker.Services.Interfaces
     }
 
     /// <summary>
-    /// Health check result
-    /// </summary>
-    public class HealthCheckResult
-    {
-        public bool IsHealthy { get; set; }
-        public string ComponentName { get; set; } = string.Empty;
-        public string Message { get; set; } = string.Empty;
-        public TimeSpan ResponseTime { get; set; }
-        public Dictionary<string, object> Details { get; set; } = new Dictionary<string, object>();
-        public Exception? Exception { get; set; }
-    }
-
-    /// <summary>
-    /// Overall health result
+    /// Overall health result (custom class for comprehensive health checks)
     /// </summary>
     public class OverallHealthResult
     {

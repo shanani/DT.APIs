@@ -53,6 +53,15 @@ namespace DT.EmailWorker.Models.Entities
         public long FileSizeBytes { get; set; }
 
         /// <summary>
+        /// File size in bytes (alias for backward compatibility)
+        /// </summary>
+        public long FileSize
+        {
+            get => FileSizeBytes;
+            set => FileSizeBytes = value;
+        }
+
+        /// <summary>
         /// Base64 encoded content
         /// </summary>
         public string? Content { get; set; }

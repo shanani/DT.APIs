@@ -3,6 +3,7 @@ using DT.EmailWorker.Models.DTOs;
 using DT.EmailWorker.Services.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace DT.EmailWorker.Services.Implementations
 {
@@ -31,71 +32,91 @@ namespace DT.EmailWorker.Services.Implementations
         public async Task<EmailProcessingResult> ProcessEmailAsync(EmailProcessingRequest request, CancellationToken cancellationToken = default)
         {
             var stopwatch = Stopwatch.StartNew();
+            var result = new EmailProcessingResult();
 
             try
             {
+                _logger.LogDebug("Starting email processing for {QueueId}", request.QueueId);
+
                 // Validate email
                 var validation = await ValidateEmailAsync(request);
                 if (!validation.IsValid)
                 {
-                    return new EmailProcessingResult
-                    {
-                        IsSuccess = false,
-                        ErrorMessage = string.Join(", ", validation.Errors),
-                        ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-                    };
+                    result.IsSuccess = false;
+                    result.ErrorMessage = string.Join(", ", validation.Errors);
+                    result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
+                    return result;
                 }
 
                 // Process template if specified
-                if (request.TemplateId.HasValue)
+                if (request.RequiresTemplateProcessing && request.TemplateId.HasValue)
                 {
                     var templateResult = await ProcessTemplateAsync(request, cancellationToken);
                     if (!templateResult.IsSuccess)
                     {
-                        return templateResult;
+                        result.IsSuccess = false;
+                        result.ErrorMessage = templateResult.ErrorMessage;
+                        result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
+                        return result;
                     }
                 }
 
-                // Process attachments
-                if (request.Attachments?.Any() == true)
+                // Process attachments if any
+                if (request.Attachments != null && request.Attachments.Any())
                 {
                     var attachmentResult = await ProcessAttachmentsAsync(request.Attachments);
                     if (!attachmentResult.IsSuccess)
                     {
-                        return new EmailProcessingResult
-                        {
-                            IsSuccess = false,
-                            ErrorMessage = $"Attachment processing failed: {attachmentResult.ErrorMessage}",
-                            ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-                        };
+                        result.IsSuccess = false;
+                        result.ErrorMessage = attachmentResult.ErrorMessage;
+                        result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
+                        return result;
                     }
                 }
 
                 // Send email via SMTP
-                var success = await _smtpService.SendEmailAsync(request);
+                var sendResult = await _smtpService.SendEmailAsync(
+                    request.ToEmails,
+                    request.Subject,
+                    request.Body,
+                    request.IsHtml,
+                    request.CcEmails,
+                    request.BccEmails,
+                    request.Attachments,
+                    cancellationToken);
 
                 stopwatch.Stop();
 
-                return new EmailProcessingResult
+                result.IsSuccess = sendResult.IsSuccess;
+                result.ErrorMessage = sendResult.ErrorMessage;
+                result.MessageId = sendResult.MessageId;
+                result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
+
+                if (result.IsSuccess)
                 {
-                    IsSuccess = success,
-                    ErrorMessage = success ? null : "Failed to send email via SMTP",
-                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
-                    MessageId = success ? Guid.NewGuid().ToString() : null
-                };
+                    _logger.LogInformation("Email {QueueId} processed successfully in {ProcessingTime}ms",
+                        request.QueueId, result.ProcessingTimeMs);
+                }
+                else
+                {
+                    _logger.LogWarning("Email {QueueId} processing failed: {Error}",
+                        request.QueueId, result.ErrorMessage);
+                }
+
+                return result;
             }
             catch (Exception ex)
             {
                 stopwatch.Stop();
-                _logger.LogError(ex, "Error processing email");
 
-                return new EmailProcessingResult
-                {
-                    IsSuccess = false,
-                    ErrorMessage = ex.Message,
-                    Exception = ex,
-                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-                };
+                _logger.LogError(ex, "Error processing email {QueueId}", request.QueueId);
+
+                result.IsSuccess = false;
+                result.ErrorMessage = ex.Message;
+                result.Exception = ex;
+                result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
+
+                return result;
             }
         }
 
@@ -103,46 +124,44 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                // Get template
-                var template = await _templateService.GetTemplateByNameAsync(request.TemplateName, cancellationToken);
-                if (template == null)
-                {
-                    return new EmailProcessingResult
-                    {
-                        IsSuccess = false,
-                        ErrorMessage = $"Template '{request.TemplateName}' not found"
-                    };
-                }
+                _logger.LogDebug("Processing template email with template {TemplateName}", request.TemplateName);
 
-                // Process template
-                var processedTemplate = await _templateService.ProcessTemplateAsync(template.Id, request.TemplateData, cancellationToken);
-                if (!processedTemplate.IsSuccess)
+                // Get template and process
+                var templateResult = await _templateService.ProcessTemplateByNameAsync(
+                    request.TemplateName,
+                    request.TemplateData,
+                    cancellationToken);
+
+                if (!templateResult.IsSuccess)
                 {
                     return new EmailProcessingResult
                     {
                         IsSuccess = false,
-                        ErrorMessage = $"Template processing failed: {processedTemplate.ErrorMessage}"
+                        ErrorMessage = templateResult.ErrorMessage
                     };
                 }
 
                 // Create processing request
                 var processingRequest = new EmailProcessingRequest
                 {
+                    QueueId = Guid.NewGuid(),
                     ToEmails = request.ToEmails,
                     CcEmails = request.CcEmails,
                     BccEmails = request.BccEmails,
-                    Subject = processedTemplate.ProcessedSubject,
-                    Body = processedTemplate.ProcessedBody,
+                    Subject = templateResult.ProcessedSubject,
+                    Body = templateResult.ProcessedBody,
                     IsHtml = true,
                     Attachments = request.Attachments,
-                    TemplateId = template.Id
+                    CreatedBy = "TemplateProcessor",
+                    RequestSource = "Template"
                 };
 
+                // Process the email
                 return await ProcessEmailAsync(processingRequest, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing template email");
+                _logger.LogError(ex, "Error processing template email {TemplateName}", request.TemplateName);
                 return new EmailProcessingResult
                 {
                     IsSuccess = false,
@@ -156,58 +175,85 @@ namespace DT.EmailWorker.Services.Implementations
         {
             var result = new ValidationResult { IsValid = true };
 
-            // Validate recipients
-            if (string.IsNullOrWhiteSpace(request.ToEmails))
+            try
             {
-                result.IsValid = false;
-                result.Errors.Add("To emails are required");
-            }
-            else
-            {
-                var emailValidation = EmailValidator.ValidateEmails(request.ToEmails);
-                if (emailValidation.Any(v => !v.IsValid))
+                // Validate recipients
+                if (string.IsNullOrWhiteSpace(request.ToEmails))
                 {
                     result.IsValid = false;
-                    result.Errors.AddRange(emailValidation.Where(v => !v.IsValid).Select(v => v.ErrorMessage ?? "Invalid email"));
+                    result.Errors.Add("At least one recipient email is required");
                 }
-            }
-
-            // Validate subject
-            if (string.IsNullOrWhiteSpace(request.Subject))
-            {
-                result.IsValid = false;
-                result.Errors.Add("Subject is required");
-            }
-
-            // Validate body
-            if (string.IsNullOrWhiteSpace(request.Body))
-            {
-                result.IsValid = false;
-                result.Errors.Add("Body is required");
-            }
-
-            // Validate CC emails if provided
-            if (!string.IsNullOrWhiteSpace(request.CcEmails))
-            {
-                var ccValidation = EmailValidator.ValidateEmails(request.CcEmails);
-                if (ccValidation.Any(v => !v.IsValid))
+                else
                 {
-                    result.Warnings.AddRange(ccValidation.Where(v => !v.IsValid).Select(v => $"Invalid CC email: {v.ErrorMessage}"));
+                    var toValidation = EmailValidator.ValidateEmails(request.ToEmails);
+                    if (toValidation.Any(v => !v.IsValid))
+                    {
+                        result.IsValid = false;
+                        result.Errors.AddRange(toValidation.Where(v => !v.IsValid).Select(v => $"Invalid recipient email: {v.ErrorMessage}"));
+                    }
                 }
-            }
 
-            // Validate BCC emails if provided
-            if (!string.IsNullOrWhiteSpace(request.BccEmails))
-            {
-                var bccValidation = EmailValidator.ValidateEmails(request.BccEmails);
-                if (bccValidation.Any(v => !v.IsValid))
+                // Validate subject
+                if (string.IsNullOrWhiteSpace(request.Subject))
                 {
-                    result.Warnings.AddRange(bccValidation.Where(v => !v.IsValid).Select(v => $"Invalid BCC email: {v.ErrorMessage}"));
+                    result.IsValid = false;
+                    result.Errors.Add("Subject is required");
                 }
-            }
 
-            await Task.CompletedTask; // Make async for future enhancements
-            return result;
+                // Validate body
+                if (string.IsNullOrWhiteSpace(request.Body))
+                {
+                    result.IsValid = false;
+                    result.Errors.Add("Body is required");
+                }
+
+                // Validate CC emails if provided
+                if (!string.IsNullOrWhiteSpace(request.CcEmails))
+                {
+                    var ccValidation = EmailValidator.ValidateEmails(request.CcEmails);
+                    if (ccValidation.Any(v => !v.IsValid))
+                    {
+                        result.Warnings.AddRange(ccValidation.Where(v => !v.IsValid).Select(v => $"Invalid CC email: {v.ErrorMessage}"));
+                    }
+                }
+
+                // Validate BCC emails if provided
+                if (!string.IsNullOrWhiteSpace(request.BccEmails))
+                {
+                    var bccValidation = EmailValidator.ValidateEmails(request.BccEmails);
+                    if (bccValidation.Any(v => !v.IsValid))
+                    {
+                        result.Warnings.AddRange(bccValidation.Where(v => !v.IsValid).Select(v => $"Invalid BCC email: {v.ErrorMessage}"));
+                    }
+                }
+
+                // Validate attachments if any
+                if (request.Attachments != null && request.Attachments.Any())
+                {
+                    foreach (var attachment in request.Attachments)
+                    {
+                        if (string.IsNullOrWhiteSpace(attachment.FileName))
+                        {
+                            result.Warnings.Add("Attachment has no filename");
+                        }
+
+                        if (string.IsNullOrWhiteSpace(attachment.Content) && string.IsNullOrWhiteSpace(attachment.FilePath))
+                        {
+                            result.Warnings.Add($"Attachment {attachment.FileName} has no content or file path");
+                        }
+                    }
+                }
+
+                await Task.CompletedTask; // Make async for future enhancements
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error validating email");
+                result.IsValid = false;
+                result.Errors.Add($"Validation error: {ex.Message}");
+                return result;
+            }
         }
 
         private async Task<EmailProcessingResult> ProcessTemplateAsync(EmailProcessingRequest request, CancellationToken cancellationToken)
@@ -219,14 +265,31 @@ namespace DT.EmailWorker.Services.Implementations
                     return new EmailProcessingResult { IsSuccess = true };
                 }
 
-                var templateData = string.IsNullOrEmpty(request.TemplateData)
-                    ? new Dictionary<string, string>()
-                    : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(request.TemplateData) ?? new Dictionary<string, string>();
+                // Parse template data from JSON string
+                var templateData = new Dictionary<string, string>();
+                if (!string.IsNullOrEmpty(request.TemplateData))
+                {
+                    try
+                    {
+                        templateData = JsonSerializer.Deserialize<Dictionary<string, string>>(request.TemplateData)
+                                     ?? new Dictionary<string, string>();
+                    }
+                    catch (JsonException ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse template data for request {QueueId}", request.QueueId);
+                        return new EmailProcessingResult
+                        {
+                            IsSuccess = false,
+                            ErrorMessage = "Invalid template data format"
+                        };
+                    }
+                }
 
                 var result = await _templateService.ProcessTemplateAsync(request.TemplateId.Value, templateData, cancellationToken);
 
                 if (result.IsSuccess)
                 {
+                    // Update the request with processed content
                     request.Subject = result.ProcessedSubject;
                     request.Body = result.ProcessedBody;
                 }
@@ -239,6 +302,7 @@ namespace DT.EmailWorker.Services.Implementations
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Error processing template for request {QueueId}", request.QueueId);
                 return new EmailProcessingResult
                 {
                     IsSuccess = false,
@@ -252,12 +316,20 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
+                if (!attachments.Any())
+                {
+                    return new EmailProcessingResult { IsSuccess = true };
+                }
+
+                // Convert AttachmentData to EmailAttachment entities
                 var emailAttachments = attachments.Select(a => new Models.Entities.EmailAttachment
                 {
                     FileName = a.FileName,
-                    ContentType = a.ContentType,
+                    ContentType = a.ContentType ?? "application/octet-stream",
                     Content = a.Content,
-                    FilePath = a.FilePath
+                    FilePath = a.FilePath,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
                 }).ToList();
 
                 var result = await _attachmentProcessor.ProcessAttachmentsAsync(emailAttachments);
@@ -265,11 +337,12 @@ namespace DT.EmailWorker.Services.Implementations
                 return new EmailProcessingResult
                 {
                     IsSuccess = result.IsSuccess,
-                    ErrorMessage = result.HasErrors ? "Attachment processing errors occurred" : null
+                    ErrorMessage = result.HasErrors ? "One or more attachment processing errors occurred" : null
                 };
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Error processing attachments");
                 return new EmailProcessingResult
                 {
                     IsSuccess = false,

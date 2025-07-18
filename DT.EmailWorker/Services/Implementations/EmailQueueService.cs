@@ -54,9 +54,9 @@ namespace DT.EmailWorker.Services.Implementations
             {
                 var dueEmails = await _context.EmailQueue
                     .Where(e => e.Status == EmailQueueStatus.Scheduled &&
+                               e.IsScheduled &&
                                e.ScheduledFor <= DateTime.UtcNow)
                     .OrderBy(e => e.ScheduledFor)
-                    .ThenBy(e => e.Priority)
                     .Take(batchSize)
                     .ToListAsync();
 
@@ -85,10 +85,11 @@ namespace DT.EmailWorker.Services.Implementations
                     email.Status = EmailQueueStatus.Processing;
                     email.ProcessingStartedAt = DateTime.UtcNow;
                     email.ProcessedBy = workerId;
+                    email.UpdatedAt = DateTime.UtcNow;
 
                     await _context.SaveChangesAsync();
 
-                    _logger.LogDebug("Marked email {QueueId} as processing by worker {WorkerId}",
+                    _logger.LogDebug("Email {QueueId} marked as processing by worker {WorkerId}",
                         queueId, workerId);
                 }
             }
@@ -111,29 +112,11 @@ namespace DT.EmailWorker.Services.Implementations
                     email.Status = EmailQueueStatus.Sent;
                     email.ProcessedAt = DateTime.UtcNow;
                     email.ProcessedBy = workerId;
+                    email.UpdatedAt = DateTime.UtcNow;
 
-                    // Create history record
-                    var history = new EmailHistory
-                    {
-                        QueueId = email.QueueId,
-                        ToEmails = email.ToEmails,
-                        CcEmails = email.CcEmails,
-                        BccEmails = email.BccEmails,
-                        Subject = email.Subject,
-                        FinalBody = email.Body,
-                        Status = EmailQueueStatus.Sent,
-                        SentAt = DateTime.UtcNow,
-                        TemplateId = email.TemplateId,
-                        TemplateUsed = email.Template?.Name,
-                        ProcessingTimeMs = processingTimeMs,
-                        RetryCount = email.RetryCount,
-                        ProcessedBy = workerId
-                    };
-
-                    _context.EmailHistory.Add(history);
                     await _context.SaveChangesAsync();
 
-                    _logger.LogInformation("Email {QueueId} sent successfully by worker {WorkerId} in {ProcessingTime}ms",
+                    _logger.LogInformation("Email {QueueId} marked as sent by worker {WorkerId} in {ProcessingTime}ms",
                         queueId, workerId, processingTimeMs);
                 }
             }
@@ -155,43 +138,26 @@ namespace DT.EmailWorker.Services.Implementations
                 {
                     email.RetryCount++;
                     email.ErrorMessage = errorMessage;
-                    email.ProcessedAt = DateTime.UtcNow;
+                    email.UpdatedAt = DateTime.UtcNow;
 
-                    if (shouldRetry && email.RetryCount < 3) // Max retry attempts
+                    // Determine if should retry based on retry count
+                    const int maxRetries = 3;
+                    if (shouldRetry && email.RetryCount < maxRetries)
                     {
-                        email.Status = EmailQueueStatus.Queued;
+                        email.Status = EmailQueueStatus.Queued; // Put back in queue for retry
                         email.ProcessingStartedAt = null;
-                        // Reset for retry after delay
-                        email.ScheduledFor = DateTime.UtcNow.AddMinutes(email.RetryCount * 5);
+                        email.ProcessedBy = null;
                     }
                     else
                     {
                         email.Status = EmailQueueStatus.Failed;
-
-                        // Create history record for failed email
-                        var history = new EmailHistory
-                        {
-                            QueueId = email.QueueId,
-                            ToEmails = email.ToEmails,
-                            CcEmails = email.CcEmails,
-                            BccEmails = email.BccEmails,
-                            Subject = email.Subject,
-                            FinalBody = email.Body,
-                            Status = EmailQueueStatus.Failed,
-                            TemplateId = email.TemplateId,
-                            TemplateUsed = email.Template?.Name,
-                            RetryCount = email.RetryCount,
-                            ErrorDetails = errorMessage,
-                            ProcessedBy = email.ProcessedBy
-                        };
-
-                        _context.EmailHistory.Add(history);
+                        email.ProcessedAt = DateTime.UtcNow;
                     }
 
                     await _context.SaveChangesAsync();
 
-                    _logger.LogWarning("Email {QueueId} failed (retry {RetryCount}): {ErrorMessage}",
-                        queueId, email.RetryCount, errorMessage);
+                    _logger.LogWarning("Email {QueueId} marked as failed. Retry count: {RetryCount}. Will retry: {WillRetry}",
+                        queueId, email.RetryCount, shouldRetry && email.RetryCount < maxRetries);
                 }
             }
             catch (Exception ex)
@@ -208,10 +174,9 @@ namespace DT.EmailWorker.Services.Implementations
                 var retryEmails = await _context.EmailQueue
                     .Where(e => e.Status == EmailQueueStatus.Queued &&
                                e.RetryCount > 0 &&
-                               e.RetryCount < maxRetryCount &&
-                               (!e.ScheduledFor.HasValue || e.ScheduledFor <= DateTime.UtcNow))
+                               e.RetryCount < maxRetryCount)
                     .OrderBy(e => e.Priority)
-                    .ThenBy(e => e.ScheduledFor)
+                    .ThenBy(e => e.CreatedAt)
                     .Take(batchSize)
                     .ToListAsync();
 
@@ -245,7 +210,7 @@ namespace DT.EmailWorker.Services.Implementations
                     TemplateId = emailRequest.TemplateId,
                     TemplateData = emailRequest.TemplateData,
                     RequiresTemplateProcessing = emailRequest.RequiresTemplateProcessing,
-                    Attachments = emailRequest.Attachments,
+                    Attachments = JsonSerializer.Serialize(emailRequest.Attachments ?? new List<AttachmentData>()),
                     HasEmbeddedImages = emailRequest.HasEmbeddedImages,
                     ScheduledFor = emailRequest.ScheduledFor,
                     IsScheduled = emailRequest.IsScheduled,
@@ -285,7 +250,7 @@ namespace DT.EmailWorker.Services.Implementations
                     TemplateId = request.TemplateId,
                     TemplateData = request.TemplateData,
                     RequiresTemplateProcessing = request.RequiresTemplateProcessing,
-                    Attachments = request.Attachments,
+                    Attachments = JsonSerializer.Serialize(request.Attachments ?? new List<AttachmentData>()),
                     HasEmbeddedImages = request.HasEmbeddedImages,
                     ScheduledFor = request.ScheduledFor,
                     IsScheduled = request.IsScheduled,
@@ -297,7 +262,7 @@ namespace DT.EmailWorker.Services.Implementations
                 _context.EmailQueue.AddRange(queueItems);
                 await _context.SaveChangesAsync();
 
-                var queueIds = queueItems.Select(q => q.QueueId).ToList();
+                var queueIds = queueItems.Select(qi => qi.QueueId).ToList();
 
                 _logger.LogInformation("Bulk queued {Count} emails", queueIds.Count);
 
@@ -317,11 +282,11 @@ namespace DT.EmailWorker.Services.Implementations
                 var email = await _context.EmailQueue
                     .FirstOrDefaultAsync(e => e.QueueId == queueId);
 
-                if (email != null &&
-                    (email.Status == EmailQueueStatus.Queued || email.Status == EmailQueueStatus.Scheduled))
+                if (email != null && (email.Status == EmailQueueStatus.Queued || email.Status == EmailQueueStatus.Scheduled))
                 {
                     email.Status = EmailQueueStatus.Cancelled;
-                    email.ProcessedAt = DateTime.UtcNow;
+                    email.UpdatedAt = DateTime.UtcNow;
+
                     await _context.SaveChangesAsync();
 
                     _logger.LogInformation("Email {QueueId} cancelled successfully", queueId);
@@ -333,77 +298,69 @@ namespace DT.EmailWorker.Services.Implementations
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error cancelling email {QueueId}", queueId);
-                throw;
+                return false;
             }
         }
 
-        public async Task<QueueStatistics> GetQueueStatisticsAsync()
+        public async Task<QueueStatistics> GetQueueStatisticsAsync(CancellationToken cancellationToken = default)
         {
             try
             {
-                var stats = new QueueStatistics();
+                var now = DateTime.UtcNow;
+                var oneHourAgo = now.AddHours(-1);
 
-                var queueCounts = await _context.EmailQueue
-                    .GroupBy(e => e.Status)
-                    .Select(g => new { Status = g.Key, Count = g.Count() })
-                    .ToListAsync();
-
-                foreach (var count in queueCounts)
+                var stats = new QueueStatistics
                 {
-                    switch (count.Status)
-                    {
-                        case EmailQueueStatus.Queued:
-                            stats.TotalQueued = count.Count;
-                            break;
-                        case EmailQueueStatus.Processing:
-                            stats.TotalProcessing = count.Count;
-                            break;
-                        case EmailQueueStatus.Failed:
-                            stats.TotalFailed = count.Count;
-                            break;
-                        case EmailQueueStatus.Scheduled:
-                            stats.TotalScheduled = count.Count;
-                            break;
-                    }
-                }
+                    TotalCount = await _context.EmailQueue.CountAsync(cancellationToken),
+                    PendingCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Queued, cancellationToken),
+                    ProcessingCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Processing, cancellationToken),
+                    SentCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Sent, cancellationToken),
+                    FailedCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Failed, cancellationToken),
+                    CancelledCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Cancelled, cancellationToken),
+                    ScheduledCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Scheduled, cancellationToken),
+                    ProcessedLastHour = await _context.EmailQueue.CountAsync(e =>
+                        (e.Status == EmailQueueStatus.Sent || e.Status == EmailQueueStatus.Failed) &&
+                        e.ProcessedAt >= oneHourAgo, cancellationToken),
+                    FailedLastHour = await _context.EmailQueue.CountAsync(e =>
+                        e.Status == EmailQueueStatus.Failed && e.ProcessedAt >= oneHourAgo, cancellationToken),
+                    HighPriorityCount = await _context.EmailQueue.CountAsync(e =>
+                        e.Priority == EmailPriority.High &&
+                        (e.Status == EmailQueueStatus.Queued || e.Status == EmailQueueStatus.Processing), cancellationToken),
+                    NormalPriorityCount = await _context.EmailQueue.CountAsync(e =>
+                        e.Priority == EmailPriority.Normal &&
+                        (e.Status == EmailQueueStatus.Queued || e.Status == EmailQueueStatus.Processing), cancellationToken),
+                    LowPriorityCount = await _context.EmailQueue.CountAsync(e =>
+                        e.Priority == EmailPriority.Low &&
+                        (e.Status == EmailQueueStatus.Queued || e.Status == EmailQueueStatus.Processing), cancellationToken)
+                };
 
-                var priorityCounts = await _context.EmailQueue
-                    .Where(e => e.Status == EmailQueueStatus.Queued)
-                    .GroupBy(e => e.Priority)
-                    .Select(g => new { Priority = g.Key, Count = g.Count() })
-                    .ToListAsync();
-
-                foreach (var count in priorityCounts)
-                {
-                    switch (count.Priority)
-                    {
-                        case EmailPriority.High:
-                            stats.HighPriorityCount = count.Count;
-                            break;
-                        case EmailPriority.Normal:
-                            stats.NormalPriorityCount = count.Count;
-                            break;
-                        case EmailPriority.Low:
-                            stats.LowPriorityCount = count.Count;
-                            break;
-                    }
-                }
-
-                var oldestQueued = await _context.EmailQueue
+                // Get oldest pending email
+                var oldestPending = await _context.EmailQueue
                     .Where(e => e.Status == EmailQueueStatus.Queued)
                     .OrderBy(e => e.CreatedAt)
-                    .Select(e => e.CreatedAt)
-                    .FirstOrDefaultAsync();
+                    .FirstOrDefaultAsync(cancellationToken);
 
-                stats.OldestQueuedEmail = oldestQueued;
-
-                if (stats.TotalQueued > 0)
+                if (oldestPending != null)
                 {
-                    var avgQueueTime = await _context.EmailQueue
-                        .Where(e => e.Status == EmailQueueStatus.Queued)
-                        .AverageAsync(e => EF.Functions.DateDiffMinute(e.CreatedAt, DateTime.UtcNow));
+                    stats.OldestPendingEmail = oldestPending.CreatedAt;
+                }
 
-                    stats.AverageQueueTimeHours = avgQueueTime / 60.0;
+                // Calculate average processing time
+                var processedEmails = await _context.EmailQueue
+                    .Where(e => e.Status == EmailQueueStatus.Sent &&
+                               e.ProcessingStartedAt != null &&
+                               e.ProcessedAt != null)
+                    .Take(100) // Sample last 100 processed emails
+                    .Select(e => new { e.ProcessingStartedAt, e.ProcessedAt })
+                    .ToListAsync(cancellationToken);
+
+                if (processedEmails.Any())
+                {
+                    var avgMs = processedEmails
+                        .Where(e => e.ProcessingStartedAt.HasValue && e.ProcessedAt.HasValue)
+                        .Average(e => (e.ProcessedAt!.Value - e.ProcessingStartedAt!.Value).TotalMilliseconds);
+
+                    stats.AverageProcessingTimeMs = avgMs;
                 }
 
                 return stats;
@@ -419,11 +376,11 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var stuckTime = DateTime.UtcNow.AddMinutes(-stuckThresholdMinutes);
+                var threshold = DateTime.UtcNow.AddMinutes(-stuckThresholdMinutes);
 
                 var stuckEmails = await _context.EmailQueue
                     .Where(e => e.Status == EmailQueueStatus.Processing &&
-                               e.ProcessingStartedAt < stuckTime)
+                               e.ProcessingStartedAt <= threshold)
                     .ToListAsync();
 
                 _logger.LogInformation("Found {Count} stuck emails", stuckEmails.Count);
@@ -441,11 +398,11 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var stuckTime = DateTime.UtcNow.AddMinutes(-stuckThresholdMinutes);
+                var threshold = DateTime.UtcNow.AddMinutes(-stuckThresholdMinutes);
 
                 var stuckEmails = await _context.EmailQueue
                     .Where(e => e.Status == EmailQueueStatus.Processing &&
-                               e.ProcessingStartedAt < stuckTime)
+                               e.ProcessingStartedAt <= threshold)
                     .ToListAsync();
 
                 foreach (var email in stuckEmails)
@@ -453,11 +410,12 @@ namespace DT.EmailWorker.Services.Implementations
                     email.Status = EmailQueueStatus.Queued;
                     email.ProcessingStartedAt = null;
                     email.ProcessedBy = null;
+                    email.UpdatedAt = DateTime.UtcNow;
                 }
 
                 await _context.SaveChangesAsync();
 
-                _logger.LogWarning("Reset {Count} stuck emails to queued status", stuckEmails.Count);
+                _logger.LogInformation("Reset {Count} stuck emails to queued status", stuckEmails.Count);
 
                 return stuckEmails.Count;
             }
@@ -473,7 +431,6 @@ namespace DT.EmailWorker.Services.Implementations
             try
             {
                 return await _context.EmailQueue
-                    .Include(e => e.Template)
                     .FirstOrDefaultAsync(e => e.QueueId == queueId);
             }
             catch (Exception ex)
@@ -490,13 +447,14 @@ namespace DT.EmailWorker.Services.Implementations
                 var email = await _context.EmailQueue
                     .FirstOrDefaultAsync(e => e.QueueId == queueId);
 
-                if (email != null && email.Status == EmailQueueStatus.Queued)
+                if (email != null && (email.Status == EmailQueueStatus.Queued || email.Status == EmailQueueStatus.Scheduled))
                 {
                     email.Priority = priority;
+                    email.UpdatedAt = DateTime.UtcNow;
+
                     await _context.SaveChangesAsync();
 
-                    _logger.LogInformation("Updated email {QueueId} priority to {Priority}",
-                        queueId, priority);
+                    _logger.LogInformation("Email {QueueId} priority updated to {Priority}", queueId, priority);
                     return true;
                 }
 
@@ -505,7 +463,7 @@ namespace DT.EmailWorker.Services.Implementations
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error updating email priority for {QueueId}", queueId);
-                throw;
+                return false;
             }
         }
 
@@ -521,10 +479,11 @@ namespace DT.EmailWorker.Services.Implementations
                     email.ScheduledFor = scheduledFor;
                     email.IsScheduled = true;
                     email.Status = EmailQueueStatus.Scheduled;
+                    email.UpdatedAt = DateTime.UtcNow;
+
                     await _context.SaveChangesAsync();
 
-                    _logger.LogInformation("Scheduled email {QueueId} for {ScheduledFor}",
-                        queueId, scheduledFor);
+                    _logger.LogInformation("Email {QueueId} scheduled for {ScheduledFor}", queueId, scheduledFor);
                     return true;
                 }
 
@@ -533,33 +492,45 @@ namespace DT.EmailWorker.Services.Implementations
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error scheduling email {QueueId}", queueId);
-                throw;
+                return false;
             }
         }
 
-        private static EmailProcessingRequest ConvertToProcessingRequest(EmailQueue email)
+        private EmailProcessingRequest ConvertToProcessingRequest(EmailQueue queueItem)
         {
+            var attachments = new List<AttachmentData>();
+
+            if (!string.IsNullOrWhiteSpace(queueItem.Attachments))
+            {
+                try
+                {
+                    attachments = JsonSerializer.Deserialize<List<AttachmentData>>(queueItem.Attachments) ?? new List<AttachmentData>();
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to deserialize attachments for queue item {QueueId}", queueItem.QueueId);
+                }
+            }
+
             return new EmailProcessingRequest
             {
-                QueueId = email.QueueId,
-                Priority = email.Priority,
-                ToEmails = email.ToEmails,
-                CcEmails = email.CcEmails,
-                BccEmails = email.BccEmails,
-                Subject = email.Subject,
-                Body = email.Body,
-                IsHtml = email.IsHtml,
-                TemplateId = email.TemplateId,
-                TemplateData = email.TemplateData,
-                RequiresTemplateProcessing = email.RequiresTemplateProcessing,
-                Attachments = email.Attachments,
-                HasEmbeddedImages = email.HasEmbeddedImages,
-                RetryCount = email.RetryCount,
-                ScheduledFor = email.ScheduledFor,
-                IsScheduled = email.IsScheduled,
-                CreatedAt = email.CreatedAt,
-                CreatedBy = email.CreatedBy,
-                RequestSource = email.RequestSource
+                QueueId = queueItem.QueueId,
+                Priority = queueItem.Priority,
+                ToEmails = queueItem.ToEmails,
+                CcEmails = queueItem.CcEmails,
+                BccEmails = queueItem.BccEmails,
+                Subject = queueItem.Subject,
+                Body = queueItem.Body,
+                IsHtml = queueItem.IsHtml,
+                TemplateId = queueItem.TemplateId,
+                TemplateData = queueItem.TemplateData,
+                RequiresTemplateProcessing = queueItem.RequiresTemplateProcessing,
+                Attachments = attachments,
+                HasEmbeddedImages = queueItem.HasEmbeddedImages,
+                ScheduledFor = queueItem.ScheduledFor,
+                IsScheduled = queueItem.IsScheduled,
+                CreatedBy = queueItem.CreatedBy,
+                RequestSource = queueItem.RequestSource
             };
         }
     }

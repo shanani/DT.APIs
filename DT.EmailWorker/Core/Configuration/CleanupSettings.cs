@@ -1,123 +1,88 @@
 namespace DT.EmailWorker.Core.Configuration
 {
     /// <summary>
-    /// Cleanup and archival configuration settings
+    /// Configuration settings for cleanup operations
     /// </summary>
     public class CleanupSettings
     {
+        /// <summary>
+        /// Number of days to retain data (default: 90 days)
+        /// </summary>
+        public int RetentionDays { get; set; } = 90;
+
+        /// <summary>
+        /// Maximum number of records to clean up in a single operation
+        /// </summary>
+        public int MaxRecordsPerCleanup { get; set; } = 1000;
+
         /// <summary>
         /// Whether automatic cleanup is enabled
         /// </summary>
         public bool EnableAutoCleanup { get; set; } = true;
 
         /// <summary>
-        /// Number of days to retain email history
+        /// Path for storing backup files before cleanup
         /// </summary>
-        public int EmailHistoryRetentionDays { get; set; } = 180;
+        public string BackupPath { get; set; } = string.Empty;
 
         /// <summary>
-        /// Number of days to retain processing logs
-        /// </summary>
-        public int ProcessingLogRetentionDays { get; set; } = 30;
-
-        /// <summary>
-        /// Number of days to retain failed emails for debugging
-        /// </summary>
-        public int FailedEmailRetentionDays { get; set; } = 7;
-
-        /// <summary>
-        /// Number of days to retain successful emails
-        /// </summary>
-        public int SuccessfulEmailRetentionDays { get; set; } = 30;
-
-        /// <summary>
-        /// Whether to archive old emails instead of deleting them
-        /// </summary>
-        public bool ArchiveOldEmails { get; set; } = true;
-
-        /// <summary>
-        /// Archive file path (null = use default temp location)
-        /// </summary>
-        public string? ArchivePath { get; set; }
-
-        /// <summary>
-        /// Whether to compress archived emails
-        /// </summary>
-        public bool CompressArchives { get; set; } = true;
-
-        /// <summary>
-        /// Archive file format (zip, 7z, tar.gz)
-        /// </summary>
-        public string ArchiveFormat { get; set; } = "zip";
-
-        /// <summary>
-        /// Maximum archive file size in MB before creating a new archive
-        /// </summary>
-        public int MaxArchiveFileSizeMB { get; set; } = 100;
-
-        /// <summary>
-        /// Interval in hours between cleanup operations
-        /// </summary>
-        public int CleanupIntervalHours { get; set; } = 24;
-
-        /// <summary>
-        /// Time of day to run cleanup (24-hour format, e.g., "02:00")
-        /// </summary>
-        public string CleanupTime { get; set; } = "02:00";
-
-        /// <summary>
-        /// Number of records to process in each cleanup batch
-        /// </summary>
-        public int CleanupBatchSize { get; set; } = 1000;
-
-        /// <summary>
-        /// Whether to clean up attachments with orphaned emails
-        /// </summary>
-        public bool CleanupOrphanedAttachments { get; set; } = true;
-
-        /// <summary>
-        /// Whether to clean up old service status records
-        /// </summary>
-        public bool CleanupOldServiceStatus { get; set; } = true;
-
-        /// <summary>
-        /// Number of days to retain service status history
-        /// </summary>
-        public int ServiceStatusRetentionDays { get; set; } = 7;
-
-        /// <summary>
-        /// Whether to vacuum/optimize database after cleanup
-        /// </summary>
-        public bool OptimizeDatabaseAfterCleanup { get; set; } = true;
-
-        /// <summary>
-        /// Whether to send cleanup reports
-        /// </summary>
-        public bool SendCleanupReports { get; set; } = false;
-
-        /// <summary>
-        /// Email addresses to send cleanup reports to
+        /// Email addresses to receive cleanup reports
         /// </summary>
         public List<string> CleanupReportRecipients { get; set; } = new List<string>();
 
         /// <summary>
-        /// Whether to backup before major cleanup operations
+        /// Whether to optimize database after cleanup
         /// </summary>
-        public bool BackupBeforeCleanup { get; set; } = false;
+        public bool OptimizeDatabaseAfterCleanup { get; set; } = true;
 
         /// <summary>
-        /// Backup retention period in days
+        /// Retention days for email history records
+        /// </summary>
+        public int EmailHistoryRetentionDays { get; set; } = 180;
+
+        /// <summary>
+        /// Retention days for processing logs
+        /// </summary>
+        public int ProcessingLogsRetentionDays { get; set; } = 30;
+
+        /// <summary>
+        /// Retention days for service status records
+        /// </summary>
+        public int ServiceStatusRetentionDays { get; set; } = 7;
+
+        /// <summary>
+        /// Retention days for failed emails
+        /// </summary>
+        public int FailedEmailsRetentionDays { get; set; } = 30;
+
+        /// <summary>
+        /// Whether to create backups before major cleanup operations
+        /// </summary>
+        public bool CreateBackupBeforeCleanup { get; set; } = true;
+
+        /// <summary>
+        /// Retention days for backup files
         /// </summary>
         public int BackupRetentionDays { get; set; } = 30;
 
         /// <summary>
-        /// Whether to enable aggressive cleanup during high storage usage
+        /// Whether to send cleanup reports via email
+        /// </summary>
+        public bool SendCleanupReports { get; set; } = true;
+
+        /// <summary>
+        /// Time interval between cleanup operations (in hours)
+        /// </summary>
+        public int CleanupIntervalHours { get; set; } = 24;
+
+        /// <summary>
+        /// Whether to perform aggressive cleanup (removes more data)
         /// </summary>
         public bool EnableAggressiveCleanup { get; set; } = false;
 
         /// <summary>
-        /// Disk usage percentage threshold to trigger aggressive cleanup
+        /// Batch size for cleanup operations
         /// </summary>
-        public int AggressiveCleanupThresholdPercent { get; set; } = 85;
+        public int CleanupBatchSize { get; set; } = 500;
     }
 }

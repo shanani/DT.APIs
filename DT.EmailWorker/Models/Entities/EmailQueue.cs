@@ -138,6 +138,11 @@ namespace DT.EmailWorker.Models.Entities
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
+        /// When the email was last updated
+        /// </summary>
+        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
         /// Who created the email request
         /// </summary>
         [Required]

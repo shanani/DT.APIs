@@ -23,104 +23,26 @@ namespace DT.EmailWorker.Services.Implementations
             _placeholderRegex = new Regex(@"\{([^}]+)\}", RegexOptions.Compiled);
         }
 
-        public async Task<TemplateData> ProcessTemplateAsync(int templateId, Dictionary<string, string> placeholders)
-        {
-            try
-            {
-                var template = await GetTemplateAsync(templateId);
-                if (template == null)
-                {
-                    return new TemplateData
-                    {
-                        TemplateId = templateId,
-                        ProcessingSuccessful = false,
-                        ProcessingError = $"Template with ID {templateId} not found"
-                    };
-                }
-
-                return await ProcessTemplateAsync(template.SubjectTemplate, template.BodyTemplate, placeholders);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error processing template {TemplateId}", templateId);
-                return new TemplateData
-                {
-                    TemplateId = templateId,
-                    ProcessingSuccessful = false,
-                    ProcessingError = ex.Message
-                };
-            }
-        }
-
-        public async Task<TemplateData> ProcessTemplateAsync(string subjectTemplate, string bodyTemplate, Dictionary<string, string> placeholders)
-        {
-            try
-            {
-                var templateData = new TemplateData
-                {
-                    SubjectTemplate = subjectTemplate,
-                    BodyTemplate = bodyTemplate,
-                    Placeholders = placeholders ?? new Dictionary<string, string>()
-                };
-
-                // Extract placeholders from templates
-                var subjectPlaceholders = await ExtractPlaceholdersAsync(subjectTemplate);
-                var bodyPlaceholders = await ExtractPlaceholdersAsync(bodyTemplate);
-                var allPlaceholders = subjectPlaceholders.Union(bodyPlaceholders).ToList();
-
-                templateData.MissingPlaceholders = allPlaceholders
-                    .Where(p => !placeholders.ContainsKey(p))
-                    .ToList();
-
-                // Process subject
-                templateData.ProcessedSubject = await ProcessStringTemplateAsync(subjectTemplate, placeholders);
-
-                // Process body
-                templateData.ProcessedBody = await ProcessStringTemplateAsync(bodyTemplate, placeholders);
-
-                templateData.ProcessingSuccessful = true;
-
-                if (templateData.MissingPlaceholders.Any())
-                {
-                    _logger.LogWarning("Template processing completed with missing placeholders: {MissingPlaceholders}",
-                        string.Join(", ", templateData.MissingPlaceholders));
-                }
-
-                return templateData;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error processing template");
-                return new TemplateData
-                {
-                    SubjectTemplate = subjectTemplate,
-                    BodyTemplate = bodyTemplate,
-                    ProcessingSuccessful = false,
-                    ProcessingError = ex.Message
-                };
-            }
-        }
-
-        public async Task<EmailTemplate?> GetTemplateAsync(int templateId)
+        public async Task<EmailTemplate?> GetTemplateByIdAsync(int templateId, CancellationToken cancellationToken = default)
         {
             try
             {
                 return await _context.EmailTemplates
-                    .FirstOrDefaultAsync(t => t.Id == templateId && t.IsActive);
+                    .FirstOrDefaultAsync(t => t.Id == templateId, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting template {TemplateId}", templateId);
+                _logger.LogError(ex, "Error getting template by ID {TemplateId}", templateId);
                 throw;
             }
         }
 
-        public async Task<EmailTemplate?> GetTemplateByNameAsync(string templateName)
+        public async Task<EmailTemplate?> GetTemplateByNameAsync(string templateName, CancellationToken cancellationToken = default)
         {
             try
             {
                 return await _context.EmailTemplates
-                    .FirstOrDefaultAsync(t => t.Name == templateName && t.IsActive);
+                    .FirstOrDefaultAsync(t => t.Name == templateName && t.IsActive, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -129,7 +51,70 @@ namespace DT.EmailWorker.Services.Implementations
             }
         }
 
-        public async Task<List<EmailTemplate>> GetActiveTemplatesAsync()
+        public async Task<TemplateProcessingResult> ProcessTemplateAsync(int templateId, Dictionary<string, string> templateData, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var template = await GetTemplateByIdAsync(templateId, cancellationToken);
+                if (template == null)
+                {
+                    return new TemplateProcessingResult
+                    {
+                        IsSuccess = false,
+                        ErrorMessage = $"Template with ID {templateId} not found"
+                    };
+                }
+
+                if (!template.IsActive)
+                {
+                    return new TemplateProcessingResult
+                    {
+                        IsSuccess = false,
+                        ErrorMessage = $"Template with ID {templateId} is not active"
+                    };
+                }
+
+                return await ProcessTemplateContentAsync(template.SubjectTemplate, template.BodyTemplate, templateData);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing template {TemplateId}", templateId);
+                return new TemplateProcessingResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = ex.Message
+                };
+            }
+        }
+
+        public async Task<TemplateProcessingResult> ProcessTemplateByNameAsync(string templateName, Dictionary<string, string> templateData, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var template = await GetTemplateByNameAsync(templateName, cancellationToken);
+                if (template == null)
+                {
+                    return new TemplateProcessingResult
+                    {
+                        IsSuccess = false,
+                        ErrorMessage = $"Template with name '{templateName}' not found or is not active"
+                    };
+                }
+
+                return await ProcessTemplateContentAsync(template.SubjectTemplate, template.BodyTemplate, templateData);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing template by name {TemplateName}", templateName);
+                return new TemplateProcessingResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = ex.Message
+                };
+            }
+        }
+
+        public async Task<List<EmailTemplate>> GetActiveTemplatesAsync(CancellationToken cancellationToken = default)
         {
             try
             {
@@ -137,7 +122,7 @@ namespace DT.EmailWorker.Services.Implementations
                     .Where(t => t.IsActive)
                     .OrderBy(t => t.Category)
                     .ThenBy(t => t.Name)
-                    .ToListAsync();
+                    .ToListAsync(cancellationToken);
             }
             catch (Exception ex)
             {
@@ -146,37 +131,36 @@ namespace DT.EmailWorker.Services.Implementations
             }
         }
 
-        public async Task<List<EmailTemplate>> GetTemplatesByCategoryAsync(string category)
+        public async Task<EmailTemplate> CreateTemplateAsync(EmailTemplate template, CancellationToken cancellationToken = default)
         {
             try
             {
-                return await _context.EmailTemplates
-                    .Where(t => t.Category == category && t.IsActive)
-                    .OrderBy(t => t.Name)
-                    .ToListAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting templates by category {Category}", category);
-                throw;
-            }
-        }
+                // Validate template
+                var validation = await ValidateTemplateAsync(template.SubjectTemplate, template.BodyTemplate);
+                if (!validation.IsValid)
+                {
+                    throw new ArgumentException($"Template validation failed: {string.Join(", ", validation.Errors)}");
+                }
 
-        public async Task<int> CreateTemplateAsync(EmailTemplate template)
-        {
-            try
-            {
+                // Check for duplicate name
+                var existingTemplate = await _context.EmailTemplates
+                    .FirstOrDefaultAsync(t => t.Name == template.Name, cancellationToken);
+
+                if (existingTemplate != null)
+                {
+                    throw new ArgumentException($"Template with name '{template.Name}' already exists");
+                }
+
                 template.CreatedAt = DateTime.UtcNow;
                 template.UpdatedAt = DateTime.UtcNow;
-                template.UpdatedBy = template.CreatedBy;
 
                 _context.EmailTemplates.Add(template);
-                await _context.SaveChangesAsync();
+                await _context.SaveChangesAsync(cancellationToken);
 
-                _logger.LogInformation("Created template {TemplateName} with ID {TemplateId}",
-                    template.Name, template.Id);
+                _logger.LogInformation("Created template {TemplateId} with name {TemplateName}",
+                    template.Id, template.Name);
 
-                return template.Id;
+                return template;
             }
             catch (Exception ex)
             {
@@ -185,33 +169,50 @@ namespace DT.EmailWorker.Services.Implementations
             }
         }
 
-        public async Task<bool> UpdateTemplateAsync(EmailTemplate template)
+        public async Task<EmailTemplate> UpdateTemplateAsync(EmailTemplate template, CancellationToken cancellationToken = default)
         {
             try
             {
+                // Validate template
+                var validation = await ValidateTemplateAsync(template.SubjectTemplate, template.BodyTemplate);
+                if (!validation.IsValid)
+                {
+                    throw new ArgumentException($"Template validation failed: {string.Join(", ", validation.Errors)}");
+                }
+
                 var existingTemplate = await _context.EmailTemplates
-                    .FirstOrDefaultAsync(t => t.Id == template.Id);
+                    .FirstOrDefaultAsync(t => t.Id == template.Id, cancellationToken);
 
                 if (existingTemplate == null)
-                    return false;
+                {
+                    throw new ArgumentException($"Template with ID {template.Id} not found");
+                }
 
+                // Check for duplicate name (excluding current template)
+                var duplicateName = await _context.EmailTemplates
+                    .AnyAsync(t => t.Name == template.Name && t.Id != template.Id, cancellationToken);
+
+                if (duplicateName)
+                {
+                    throw new ArgumentException($"Template with name '{template.Name}' already exists");
+                }
+
+                // Update properties
                 existingTemplate.Name = template.Name;
-                existingTemplate.Description = template.Description;
                 existingTemplate.Category = template.Category;
+                existingTemplate.Description = template.Description;
                 existingTemplate.SubjectTemplate = template.SubjectTemplate;
                 existingTemplate.BodyTemplate = template.BodyTemplate;
-                existingTemplate.TemplateData = template.TemplateData;
                 existingTemplate.IsActive = template.IsActive;
-                existingTemplate.Version++;
+                existingTemplate.Tags = template.Tags;
                 existingTemplate.UpdatedAt = DateTime.UtcNow;
-                existingTemplate.UpdatedBy = template.UpdatedBy;
 
-                await _context.SaveChangesAsync();
+                await _context.SaveChangesAsync(cancellationToken);
 
-                _logger.LogInformation("Updated template {TemplateName} (ID: {TemplateId})",
-                    template.Name, template.Id);
+                _logger.LogInformation("Updated template {TemplateId} with name {TemplateName}",
+                    template.Id, template.Name);
 
-                return true;
+                return existingTemplate;
             }
             catch (Exception ex)
             {
@@ -220,83 +221,101 @@ namespace DT.EmailWorker.Services.Implementations
             }
         }
 
-        public async Task<bool> DeleteTemplateAsync(int templateId)
+        private async Task<TemplateProcessingResult> ProcessTemplateContentAsync(string subjectTemplate, string bodyTemplate, Dictionary<string, string> templateData)
         {
+            await Task.CompletedTask; // Make method async for consistency
+
             try
             {
-                var template = await _context.EmailTemplates
-                    .FirstOrDefaultAsync(t => t.Id == templateId);
+                var result = new TemplateProcessingResult();
 
-                if (template == null || template.IsSystem)
-                    return false;
+                // Validate templates first
+                var validation = await ValidateTemplateAsync(subjectTemplate, bodyTemplate);
+                if (!validation.IsValid)
+                {
+                    result.ValidationErrors.AddRange(validation.Errors);
+                    result.ErrorMessage = string.Join(", ", validation.Errors);
+                    return result;
+                }
 
-                _context.EmailTemplates.Remove(template);
-                await _context.SaveChangesAsync();
+                // Process subject
+                result.ProcessedSubject = ProcessPlaceholders(subjectTemplate, templateData ?? new Dictionary<string, string>());
 
-                _logger.LogInformation("Deleted template {TemplateId}", templateId);
+                // Process body
+                result.ProcessedBody = ProcessPlaceholders(bodyTemplate, templateData ?? new Dictionary<string, string>());
 
-                return true;
+                // Check for unresolved placeholders
+                var unresolvedSubject = _placeholderRegex.Matches(result.ProcessedSubject).Cast<Match>().Select(m => m.Value).ToList();
+                var unresolvedBody = _placeholderRegex.Matches(result.ProcessedBody).Cast<Match>().Select(m => m.Value).ToList();
+
+                if (unresolvedSubject.Any())
+                {
+                    result.ValidationErrors.Add($"Unresolved placeholders in subject: {string.Join(", ", unresolvedSubject)}");
+                }
+
+                if (unresolvedBody.Any())
+                {
+                    result.ValidationErrors.Add($"Unresolved placeholders in body: {string.Join(", ", unresolvedBody)}");
+                }
+
+                result.IsSuccess = !result.ValidationErrors.Any();
+
+                if (!result.IsSuccess)
+                {
+                    result.ErrorMessage = string.Join(", ", result.ValidationErrors);
+                }
+
+                return result;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error deleting template {TemplateId}", templateId);
-                throw;
+                _logger.LogError(ex, "Error processing template content");
+                return new TemplateProcessingResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = ex.Message
+                };
             }
         }
 
-        public async Task<bool> SetTemplateActiveAsync(int templateId, bool isActive)
+        private string ProcessPlaceholders(string template, Dictionary<string, string> templateData)
         {
-            try
+            if (string.IsNullOrWhiteSpace(template))
+                return template;
+
+            return _placeholderRegex.Replace(template, match =>
             {
-                var template = await _context.EmailTemplates
-                    .FirstOrDefaultAsync(t => t.Id == templateId);
+                var placeholder = match.Groups[1].Value;
 
-                if (template == null)
-                    return false;
+                // Try exact match first
+                if (templateData.TryGetValue(placeholder, out var value))
+                {
+                    return value ?? string.Empty;
+                }
 
-                template.IsActive = isActive;
-                template.UpdatedAt = DateTime.UtcNow;
+                // Try case-insensitive match
+                var caseInsensitiveKey = templateData.Keys
+                    .FirstOrDefault(k => string.Equals(k, placeholder, StringComparison.OrdinalIgnoreCase));
 
-                await _context.SaveChangesAsync();
+                if (caseInsensitiveKey != null)
+                {
+                    return templateData[caseInsensitiveKey] ?? string.Empty;
+                }
 
-                _logger.LogInformation("Set template {TemplateId} active status to {IsActive}",
-                    templateId, isActive);
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error setting template active status {TemplateId}", templateId);
-                throw;
-            }
+                // Return original placeholder if not found
+                return match.Value;
+            });
         }
 
-        public async Task<TemplateValidationResult> ValidateTemplateAsync(string subjectTemplate, string bodyTemplate)
+        private async Task<TemplateValidationResult> ValidateTemplateAsync(string subjectTemplate, string bodyTemplate)
         {
+            await Task.CompletedTask; // Make method async for consistency
+
+            var result = new TemplateValidationResult();
+
             try
             {
-                var result = new TemplateValidationResult();
-
-                // Extract placeholders
-                var subjectPlaceholders = await ExtractPlaceholdersAsync(subjectTemplate);
-                var bodyPlaceholders = await ExtractPlaceholdersAsync(bodyTemplate);
-                var allPlaceholders = subjectPlaceholders.Union(bodyPlaceholders).ToList();
-
-                result.Placeholders = allPlaceholders;
-                result.PlaceholderCount = allPlaceholders.Count;
-
-                // Validate placeholder syntax
-                if (subjectPlaceholders.Count != _placeholderRegex.Matches(subjectTemplate).Count)
-                {
-                    result.Errors.Add("Subject template contains malformed placeholders");
-                }
-
-                if (bodyPlaceholders.Count != _placeholderRegex.Matches(bodyTemplate).Count)
-                {
-                    result.Errors.Add("Body template contains malformed placeholders");
-                }
-
-                // Check for common issues
+                // Check for empty templates
                 if (string.IsNullOrWhiteSpace(subjectTemplate))
                 {
                     result.Errors.Add("Subject template cannot be empty");
@@ -307,15 +326,37 @@ namespace DT.EmailWorker.Services.Implementations
                     result.Errors.Add("Body template cannot be empty");
                 }
 
-                // Check for potential HTML issues in body
-                if (bodyTemplate.Contains("<script"))
+                // Extract and validate placeholders
+                var subjectPlaceholders = ExtractPlaceholders(subjectTemplate);
+                var bodyPlaceholders = ExtractPlaceholders(bodyTemplate);
+                var allPlaceholders = subjectPlaceholders.Union(bodyPlaceholders).ToList();
+
+                result.Placeholders = allPlaceholders;
+                result.PlaceholderCount = allPlaceholders.Count;
+
+                // Validate placeholder syntax
+                foreach (var placeholder in allPlaceholders)
                 {
-                    result.Warnings.Add("Body template contains script tags which may be blocked by email clients");
+                    if (string.IsNullOrWhiteSpace(placeholder))
+                    {
+                        result.Errors.Add("Empty placeholder found");
+                    }
+
+                    if (placeholder.Contains("{") || placeholder.Contains("}"))
+                    {
+                        result.Errors.Add($"Nested brackets not allowed in placeholder: {placeholder}");
+                    }
                 }
 
-                if (bodyTemplate.Contains("javascript:"))
+                // Check for malformed brackets
+                if (CountBrackets(subjectTemplate) % 2 != 0)
                 {
-                    result.Warnings.Add("Body template contains JavaScript which may be blocked by email clients");
+                    result.Errors.Add("Unmatched brackets in subject template");
+                }
+
+                if (CountBrackets(bodyTemplate) % 2 != 0)
+                {
+                    result.Errors.Add("Unmatched brackets in body template");
                 }
 
                 result.IsValid = !result.Errors.Any();
@@ -324,126 +365,103 @@ namespace DT.EmailWorker.Services.Implementations
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error validating template");
-                return new TemplateValidationResult
-                {
-                    IsValid = false,
-                    Errors = new List<string> { ex.Message }
-                };
-            }
-        }
-
-        public async Task<List<string>> ExtractPlaceholdersAsync(string template)
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(template))
-                    return new List<string>();
-
-                var matches = _placeholderRegex.Matches(template);
-                return matches.Cast<Match>()
-                    .Select(m => m.Groups[1].Value.Trim())
-                    .Distinct()
-                    .ToList();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error extracting placeholders from template");
-                throw;
-            }
-        }
-
-        public async Task<string> ProcessStringTemplateAsync(string template, Dictionary<string, string> placeholders)
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(template))
-                    return string.Empty;
-
-                if (placeholders == null || !placeholders.Any())
-                    return template;
-
-                var result = template;
-
-                foreach (var placeholder in placeholders)
-                {
-                    var pattern = $"{{{placeholder.Key}}}";
-                    result = result.Replace(pattern, placeholder.Value ?? string.Empty);
-                }
-
+                result.Errors.Add($"Validation error: {ex.Message}");
+                result.IsValid = false;
                 return result;
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error processing string template");
-                throw;
-            }
         }
 
-        public async Task<int> CloneTemplateAsync(int templateId, string newName, string createdBy)
+        private List<string> ExtractPlaceholders(string template)
+        {
+            if (string.IsNullOrWhiteSpace(template))
+                return new List<string>();
+
+            return _placeholderRegex.Matches(template)
+                .Cast<Match>()
+                .Select(m => m.Groups[1].Value)
+                .Distinct()
+                .ToList();
+        }
+
+        private int CountBrackets(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return 0;
+
+            return text.Count(c => c == '{' || c == '}');
+        }
+
+        // Additional helper methods for template management
+        public async Task<bool> DeleteTemplateAsync(int templateId, CancellationToken cancellationToken = default)
         {
             try
             {
-                var sourceTemplate = await GetTemplateAsync(templateId);
-                if (sourceTemplate == null)
-                    throw new ArgumentException($"Template {templateId} not found");
+                var template = await _context.EmailTemplates
+                    .FirstOrDefaultAsync(t => t.Id == templateId, cancellationToken);
 
-                var clonedTemplate = new EmailTemplate
-                {
-                    Name = newName,
-                    Description = $"Cloned from {sourceTemplate.Name}",
-                    Category = sourceTemplate.Category,
-                    SubjectTemplate = sourceTemplate.SubjectTemplate,
-                    BodyTemplate = sourceTemplate.BodyTemplate,
-                    TemplateData = sourceTemplate.TemplateData,
-                    IsActive = true,
-                    IsSystem = false,
-                    Version = 1,
-                    CreatedBy = createdBy
-                };
-
-                return await CreateTemplateAsync(clonedTemplate);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error cloning template {TemplateId}", templateId);
-                throw;
-            }
-        }
-
-        public async Task<TemplateUsageStatistics> GetTemplateUsageAsync(int templateId, int days = 30)
-        {
-            try
-            {
-                var startDate = DateTime.UtcNow.AddDays(-days);
-
-                var template = await GetTemplateAsync(templateId);
                 if (template == null)
-                    throw new ArgumentException($"Template {templateId} not found");
+                    return false;
 
-                var usage = await _context.EmailHistory
-                    .Where(h => h.TemplateId == templateId && h.CreatedAt >= startDate)
-                    .GroupBy(h => h.TemplateId)
+                // Check if template is being used
+                var isUsed = await _context.EmailQueue
+                    .AnyAsync(eq => eq.TemplateId == templateId, cancellationToken);
+
+                if (isUsed)
+                {
+                    // Instead of deleting, mark as inactive
+                    template.IsActive = false;
+                    template.UpdatedAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    _context.EmailTemplates.Remove(template);
+                }
+
+                await _context.SaveChangesAsync(cancellationToken);
+
+                _logger.LogInformation("Template {TemplateId} {'deleted' : 'deactivated'}",
+                    templateId, isUsed ? "deactivated" : "deleted");
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting template {TemplateId}", templateId);
+                throw;
+            }
+        }
+
+        public async Task<TemplateUsageStatistics> GetTemplateUsageStatisticsAsync(int templateId, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var template = await GetTemplateByIdAsync(templateId, cancellationToken);
+                if (template == null)
+                {
+                    throw new ArgumentException($"Template with ID {templateId} not found");
+                }
+
+                var usageStats = await _context.EmailHistory
+                    .Where(eh => eh.TemplateId == templateId)
+                    .GroupBy(eh => eh.TemplateId)
                     .Select(g => new
                     {
                         TimesUsed = g.Count(),
-                        SuccessfulSends = g.Count(h => h.Status == Models.Enums.EmailQueueStatus.Sent),
-                        FailedSends = g.Count(h => h.Status == Models.Enums.EmailQueueStatus.Failed),
-                        LastUsed = g.Max(h => h.CreatedAt),
-                        AverageProcessingTime = g.Average(h => h.ProcessingTimeMs ?? 0)
+                        SuccessfulSends = g.Count(eh => eh.SentAt != null),
+                        LastUsed = g.Max(eh => eh.CreatedAt)
                     })
-                    .FirstOrDefaultAsync();
+                    .FirstOrDefaultAsync(cancellationToken);
 
                 return new TemplateUsageStatistics
                 {
                     TemplateId = templateId,
                     TemplateName = template.Name,
-                    TimesUsed = usage?.TimesUsed ?? 0,
-                    SuccessfulSends = usage?.SuccessfulSends ?? 0,
-                    FailedSends = usage?.FailedSends ?? 0,
-                    LastUsed = usage?.LastUsed ?? DateTime.MinValue,
-                    SuccessRate = usage?.TimesUsed > 0 ? (double)(usage.SuccessfulSends) / usage.TimesUsed * 100 : 0,
-                    AverageProcessingTimeMs = usage?.AverageProcessingTime ?? 0
+                    TimesUsed = usageStats?.TimesUsed ?? 0,
+                    SuccessfulSends = usageStats?.SuccessfulSends ?? 0,
+                    FailedSends = (usageStats?.TimesUsed ?? 0) - (usageStats?.SuccessfulSends ?? 0),
+                    LastUsed = usageStats?.LastUsed ?? DateTime.MinValue,
+                    SuccessRate = usageStats?.TimesUsed > 0 ?
+                        (double)(usageStats.SuccessfulSends) / usageStats.TimesUsed * 100 : 0
                 };
             }
             catch (Exception ex)
@@ -452,5 +470,30 @@ namespace DT.EmailWorker.Services.Implementations
                 throw;
             }
         }
+    }
+
+    /// <summary>
+    /// Template validation result
+    /// </summary>
+    public class TemplateValidationResult
+    {
+        public bool IsValid { get; set; }
+        public List<string> Errors { get; set; } = new List<string>();
+        public List<string> Placeholders { get; set; } = new List<string>();
+        public int PlaceholderCount { get; set; }
+    }
+
+    /// <summary>
+    /// Template usage statistics
+    /// </summary>
+    public class TemplateUsageStatistics
+    {
+        public int TemplateId { get; set; }
+        public string TemplateName { get; set; } = string.Empty;
+        public int TimesUsed { get; set; }
+        public int SuccessfulSends { get; set; }
+        public int FailedSends { get; set; }
+        public DateTime LastUsed { get; set; }
+        public double SuccessRate { get; set; }
     }
 }
