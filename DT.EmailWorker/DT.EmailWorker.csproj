@@ -11,8 +11,8 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<!-- Email Service Dependencies (copied from proven DT.APIs) -->
-		<PackageReference Include="HtmlAgilityPack" Version="1.12.1" />
+		<!-- Email Service Dependencies (MailKit) -->
+		<PackageReference Include="HtmlAgilityPack" Version="1.11.61" />
 		<PackageReference Include="MailKit" Version="4.3.0" />
 		<PackageReference Include="MimeKit" Version="4.3.0" />
 
@@ -23,19 +23,15 @@
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
-		<PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
-			<PrivateAssets>all</PrivateAssets>
-			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-		</PackageReference>
 
-		<!-- Core Worker Dependencies -->
+		<!-- Core Worker Dependencies - FIXED VERSIONS -->
 		<PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
 		<PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Configuration" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+		<PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Configuration" Version="8.0.1" />
 
 		<!-- Health Monitoring -->
 		<PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="8.0.0" />
@@ -43,34 +39,10 @@
 
 		<!-- JSON Processing -->
 		<PackageReference Include="System.Text.Json" Version="8.0.0" />
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
 
-		<!-- Performance Monitoring -->
-		<PackageReference Include="System.Diagnostics.PerformanceCounter" Version="8.0.0" />
-
-		<!-- Logging (Optional: NLog integration) -->
+		<!-- Logging -->
 		<PackageReference Include="NLog" Version="5.2.7" />
 		<PackageReference Include="NLog.Extensions.Logging" Version="5.3.7" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<!-- Folder Structure for Organization -->
-		<Folder Include="Data\Migrations\" />
-		<Folder Include="Models\Entities\" />
-		<Folder Include="Models\DTOs\" />
-		<Folder Include="Models\Enums\" />
-		<Folder Include="Services\Interfaces\" />
-		<Folder Include="Services\Implementations\" />
-		<Folder Include="Workers\" />
-		<Folder Include="Core\Configuration\" />
-		<Folder Include="Core\Engines\" />
-		<Folder Include="Core\Utilities\" />
-		<Folder Include="Core\Extensions\" />
-		<Folder Include="Repositories\Interfaces\" />
-		<Folder Include="Repositories\Implementations\" />
-		<Folder Include="Monitoring\HealthChecks\" />
-		<Folder Include="Monitoring\Metrics\" />
-		<Folder Include="Monitoring\Alerts\" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -79,9 +51,6 @@
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
 		<None Update="appsettings.Production.json">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</None>
-		<None Update="appsettings.Development.json">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
 		<None Update="nlog.config">

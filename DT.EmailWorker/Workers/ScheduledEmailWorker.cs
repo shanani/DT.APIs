@@ -70,3 +70,4 @@ namespace DT.EmailWorker.Workers
             }
         }
     }
+}

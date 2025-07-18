@@ -67,4 +67,63 @@ namespace DT.EmailWorker.Models.Entities
         // Template Info
         /// <summary>
         /// Template ID that was used
-        /
+        /// </summary>
+        public int? TemplateId { get; set; }
+
+        /// <summary>
+        /// Template name that was used
+        /// </summary>
+        [MaxLength(255)]
+        public string? TemplateUsed { get; set; }
+
+        // Attachments
+        /// <summary>
+        /// Number of attachments
+        /// </summary>
+        public int AttachmentCount { get; set; } = 0;
+
+        /// <summary>
+        /// Attachment metadata as JSON
+        /// </summary>
+        public string? AttachmentMetadata { get; set; }
+
+        // Processing Info
+        /// <summary>
+        /// Processing time in milliseconds
+        /// </summary>
+        public int? ProcessingTimeMs { get; set; }
+
+        /// <summary>
+        /// Number of retry attempts before success/failure
+        /// </summary>
+        public int RetryCount { get; set; } = 0;
+
+        /// <summary>
+        /// Error details if failed
+        /// </summary>
+        public string? ErrorDetails { get; set; }
+
+        /// <summary>
+        /// Worker ID that processed this email
+        /// </summary>
+        [MaxLength(100)]
+        public string? ProcessedBy { get; set; }
+
+        // Metadata
+        /// <summary>
+        /// When the history record was created
+        /// </summary>
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// When the record was archived
+        /// </summary>
+        public DateTime? ArchivedAt { get; set; }
+
+        // Navigation Properties
+        /// <summary>
+        /// Template reference if a template was used
+        /// </summary>
+        public virtual EmailTemplate? Template { get; set; }
+    }
+}

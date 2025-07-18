@@ -5,6 +5,7 @@ using DT.EmailWorker.Repositories.Interfaces;
 using DT.EmailWorker.Repositories.Implementations;
 using DT.EmailWorker.Core.Configuration;
 using DT.EmailWorker.Core.Utilities;
+using DT.EmailWorker.Monitoring.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -43,6 +44,7 @@ namespace DT.EmailWorker.Core.Extensions
             services.AddScoped<IEmailProcessingService, EmailProcessingService>();
             services.AddScoped<ITemplateService, TemplateService>();
             services.AddScoped<ISmtpService, SmtpService>();
+            services.AddScoped<ISchedulingService, SchedulingService>();
             services.AddScoped<IHealthService, HealthService>();
             services.AddScoped<ICleanupService, CleanupService>();
 
@@ -52,7 +54,9 @@ namespace DT.EmailWorker.Core.Extensions
             // Health Checks
             services.AddHealthChecks()
                 .AddDbContextCheck<EmailDbContext>("database")
-                .AddCheck("smtp", () => HealthCheckResult.Healthy("SMTP service available"));
+                .AddCheck<DatabaseHealthCheck>("database-extended")
+                .AddCheck<SmtpHealthCheck>("smtp")
+                .AddCheck<QueueHealthCheck>("queue");
 
             return services;
         }
