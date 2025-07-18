@@ -45,7 +45,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             var mailSettings = _configuration.GetSection("SmtpSettings");
 
-            using var smtpClient = new SmtpClient();
+            using var smtpClient = new System.Net.Mail.SmtpClient();
             var mailMessage = CreateMimeMessageFromRequest(request, mailSettings);
 
             try
