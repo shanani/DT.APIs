@@ -2,6 +2,7 @@ using DT.EmailWorker.Core.Configuration;
 using DT.EmailWorker.Models.DTOs;
 using DT.EmailWorker.Models.Enums;
 using DT.EmailWorker.Services.Interfaces;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 
 namespace DT.EmailWorker.Workers
@@ -14,15 +15,18 @@ namespace DT.EmailWorker.Workers
         private readonly ILogger<HealthCheckWorker> _logger;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly EmailWorkerSettings _settings;
+        private readonly ProcessingSettings _processingSettings;
 
         public HealthCheckWorker(
             ILogger<HealthCheckWorker> logger,
             IServiceScopeFactory scopeFactory,
-            IOptions<EmailWorkerSettings> settings)
+            IOptions<EmailWorkerSettings> settings,
+            IOptions<ProcessingSettings> processingSettings)
         {
             _logger = logger;
             _scopeFactory = scopeFactory;
             _settings = settings.Value;
+            _processingSettings = processingSettings.Value;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -63,7 +67,7 @@ namespace DT.EmailWorker.Workers
                     await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
                 }
 
-                // Wait for the configured interval
+                // FIXED: Use HealthCheckIntervalMinutes from EmailWorkerSettings
                 await Task.Delay(TimeSpan.FromMinutes(_settings.HealthCheckIntervalMinutes), stoppingToken);
             }
 
@@ -87,7 +91,8 @@ namespace DT.EmailWorker.Workers
                 await healthService.UpdateServiceStatusAsync(healthResult.OverallStatus);
 
                 // Check for stuck emails and reset them
-                var stuckCount = await queueService.ResetStuckEmailsAsync(_settings.MaxProcessingTimeMinutes);
+                // FIXED: Use ProcessingSettings.MaxProcessingTimeMinutes instead of EmailWorkerSettings
+                var stuckCount = await queueService.ResetStuckEmailsAsync(_processingSettings.MaxProcessingTimeMinutes);
                 if (stuckCount > 0)
                 {
                     _logger.LogWarning("Reset {StuckCount} stuck emails", stuckCount);
@@ -105,13 +110,14 @@ namespace DT.EmailWorker.Workers
                 var performanceMetrics = await healthService.GetPerformanceMetricsAsync(1); // Last hour
 
                 // Update detailed performance metrics
+                // FIXED: Use ProcessingSettings.MaxConcurrentWorkers instead of EmailWorkerSettings
                 await healthService.UpdatePerformanceMetricsAsync(new PerformanceMetrics
                 {
                     EmailsProcessedLastHour = performanceMetrics.TotalEmailsProcessed,
                     EmailsFailedLastHour = performanceMetrics.TotalEmailsFailed,
                     AverageProcessingTimeMs = performanceMetrics.AverageProcessingTimeMs,
                     CurrentQueueDepth = queueStats.TotalQueued,
-                    ActiveWorkers = _settings.MaxConcurrentWorkers
+                    ActiveWorkers = _processingSettings.MaxConcurrentWorkers
                 });
 
                 // Log health summary
@@ -135,8 +141,9 @@ namespace DT.EmailWorker.Workers
                             {
                                 ["QueueDepth"] = queueStats.TotalQueued,
                                 ["FailedComponents"] = healthResult.ComponentResults
-                                    .Where(r => !r.IsHealthy)
-                                    .Select(r => r.ComponentName)
+                                    // FIXED: Use HealthCheckResult.Status == HealthStatus.Healthy instead of IsHealthy
+                                    .Where(r => r.Status != HealthStatus.Healthy)
+                                    .Select(r => r.Description ?? "Unknown component")
                                     .ToList()
                             });
                     }
@@ -185,43 +192,44 @@ namespace DT.EmailWorker.Workers
                 if (queueStats.TotalQueued > 1000)
                 {
                     var alertLevel = queueStats.TotalQueued > 5000 ? AlertLevel.Critical : AlertLevel.Warning;
+
                     await healthService.SendHealthAlertAsync(alertLevel,
-                        $"High queue depth detected: {queueStats.TotalQueued} emails",
+                        $"High queue depth detected: {queueStats.TotalQueued} emails queued",
                         new Dictionary<string, object>
                         {
                             ["QueueDepth"] = queueStats.TotalQueued,
-                            ["HighPriority"] = queueStats.HighPriorityCount,
-                            ["Failed"] = queueStats.TotalFailed
+                            ["ProcessingCount"] = queueStats.TotalProcessing,
+                            ["FailedCount"] = queueStats.TotalFailed
                         });
                 }
 
                 // Check for high failure rate
-                var totalEmails = queueStats.TotalQueued + queueStats.TotalFailed;
-                if (totalEmails > 0)
+                var totalProcessed = queueStats.TotalSent + queueStats.TotalFailed;
+                if (totalProcessed > 0)
                 {
-                    var failureRate = (double)queueStats.TotalFailed / totalEmails * 100;
+                    var failureRate = (double)queueStats.TotalFailed / totalProcessed * 100;
                     if (failureRate > 10) // More than 10% failure rate
                     {
                         await healthService.SendHealthAlertAsync(AlertLevel.Warning,
-                            $"High failure rate detected: {failureRate:F1}%",
+                            $"High failure rate detected: {failureRate:F1}% of emails are failing",
                             new Dictionary<string, object>
                             {
                                 ["FailureRate"] = failureRate,
                                 ["TotalFailed"] = queueStats.TotalFailed,
-                                ["TotalEmails"] = totalEmails
+                                ["TotalProcessed"] = totalProcessed
                             });
                     }
                 }
 
-                // Check for old queued emails
-                if (queueStats.OldestQueuedEmail != default && queueStats.AverageQueueTimeHours > 24)
+                // Check for processing slowdown
+                if (queueStats.ProcessingRate < 10 && queueStats.TotalQueued > 100) // Less than 10 emails/hour with backlog
                 {
                     await healthService.SendHealthAlertAsync(AlertLevel.Warning,
-                        $"Old emails in queue - average age: {queueStats.AverageQueueTimeHours:F1} hours",
+                        $"Processing slowdown detected: {queueStats.ProcessingRate:F1} emails/hour with {queueStats.TotalQueued} queued",
                         new Dictionary<string, object>
                         {
-                            ["AverageQueueTimeHours"] = queueStats.AverageQueueTimeHours,
-                            ["OldestEmail"] = queueStats.OldestQueuedEmail
+                            ["ProcessingRate"] = queueStats.ProcessingRate,
+                            ["QueueDepth"] = queueStats.TotalQueued
                         });
                 }
             }
@@ -229,12 +237,6 @@ namespace DT.EmailWorker.Workers
             {
                 _logger.LogError(ex, "Error checking queue health");
             }
-        }
-
-        public override async Task StopAsync(CancellationToken stoppingToken)
-        {
-            _logger.LogInformation("Health Check Worker stopping...");
-            await base.StopAsync(stoppingToken);
         }
     }
 }

@@ -6,6 +6,36 @@ namespace DT.EmailWorker.Core.Configuration
     public class ProcessingSettings
     {
         /// <summary>
+        /// Batch size for processing emails
+        /// </summary>
+        public int BatchSize { get; set; } = 50;
+
+        /// <summary>
+        /// Maximum number of concurrent workers
+        /// </summary>
+        public int MaxConcurrentWorkers { get; set; } = 5;
+
+        /// <summary>
+        /// Maximum retry attempts for failed emails
+        /// </summary>
+        public int MaxRetryAttempts { get; set; } = 3;
+
+        /// <summary>
+        /// Delay between retry attempts in minutes
+        /// </summary>
+        public int RetryDelayMinutes { get; set; } = 15;
+
+        /// <summary>
+        /// Maximum processing time per email in minutes
+        /// </summary>
+        public int MaxProcessingTimeMinutes { get; set; } = 10;
+
+        /// <summary>
+        /// Processing timeout in minutes
+        /// </summary>
+        public int ProcessingTimeoutMinutes { get; set; } = 10;
+
+        /// <summary>
         /// Maximum attachment size in MB
         /// </summary>
         public int MaxAttachmentSizeMB { get; set; } = 25;
@@ -71,11 +101,6 @@ namespace DT.EmailWorker.Core.Configuration
         public bool LogMissingPlaceholders { get; set; } = true;
 
         /// <summary>
-        /// Maximum processing time per email in minutes
-        /// </summary>
-        public int MaxProcessingTimeMinutes { get; set; } = 10;
-
-        /// <summary>
         /// Whether to enable parallel attachment processing
         /// </summary>
         public bool EnableParallelAttachmentProcessing { get; set; } = true;
@@ -86,43 +111,23 @@ namespace DT.EmailWorker.Core.Configuration
         public int MaxConcurrentAttachmentProcesses { get; set; } = 3;
 
         /// <summary>
-        /// Supported image formats for CID processing
+        /// Whether to enable batch processing
         /// </summary>
-        public List<string> SupportedImageFormats { get; set; } = new List<string>
-        {
-            "jpg", "jpeg", "png", "gif", "bmp", "webp"
-        };
+        public bool EnableBatchProcessing { get; set; } = true;
 
         /// <summary>
-        /// Supported attachment formats
+        /// Minimum batch size for parallel processing
         /// </summary>
-        public List<string> SupportedAttachmentFormats { get; set; } = new List<string>
-        {
-            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv",
-            "jpg", "jpeg", "png", "gif", "bmp", "zip", "rar", "7z"
-        };
+        public int MinBatchSizeForParallel { get; set; } = 10;
 
         /// <summary>
-        /// Blocked attachment formats for security
+        /// Whether to enable performance monitoring
         /// </summary>
-        public List<string> BlockedAttachmentFormats { get; set; } = new List<string>
-        {
-            "exe", "bat", "cmd", "com", "pif", "scr", "vbs", "js"
-        };
+        public bool EnablePerformanceMonitoring { get; set; } = true;
 
         /// <summary>
-        /// Whether to enable virus scanning for attachments
+        /// Performance monitoring interval in seconds
         /// </summary>
-        public bool EnableVirusScanning { get; set; } = false;
-
-        /// <summary>
-        /// Whether to compress large attachments
-        /// </summary>
-        public bool EnableAttachmentCompression { get; set; } = false;
-
-        /// <summary>
-        /// Compression threshold in MB
-        /// </summary>
-        public int CompressionThresholdMB { get; set; } = 5;
+        public int PerformanceMonitoringIntervalSeconds { get; set; } = 60;
     }
 }

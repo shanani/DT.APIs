@@ -21,6 +21,11 @@ namespace DT.EmailWorker.Core.Configuration
         public int ScheduledEmailCheckIntervalMinutes { get; set; } = 1;
 
         /// <summary>
+        /// Health check interval in minutes
+        /// </summary>
+        public int HealthCheckIntervalMinutes { get; set; } = 5;
+
+        /// <summary>
         /// Email address for status reports
         /// </summary>
         public string? StatusReportEmail { get; set; }
@@ -44,5 +49,6 @@ namespace DT.EmailWorker.Core.Configuration
         /// Service description
         /// </summary>
         public string Description { get; set; } = "Enterprise Email Processing Service";
+        public int MaxConcurrentWorkers { get; internal set; }
     }
 }

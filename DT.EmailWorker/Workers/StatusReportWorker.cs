@@ -114,14 +114,14 @@ namespace DT.EmailWorker.Workers
                 report.AppendLine("Queue Statistics:");
                 report.AppendLine($"  Queued Emails: {queueStats.TotalQueued:N0}");
                 report.AppendLine($"  Processing Emails: {queueStats.TotalProcessing:N0}");
-                report.AppendLine($"  Sent Emails: {queueStats.TotalSent:N0}");
+                report.AppendLine($"  Sent Emails: {queueStats.SentCount:N0}");
                 report.AppendLine($"  Failed Emails: {queueStats.TotalFailed:N0}");
                 report.AppendLine($"  Scheduled Emails: {queueStats.TotalScheduled:N0}");
 
-                var totalProcessed = queueStats.TotalSent + queueStats.TotalFailed;
+                var totalProcessed = queueStats.SentCount + queueStats.TotalFailed;
                 if (totalProcessed > 0)
                 {
-                    var successRate = (double)queueStats.TotalSent / totalProcessed * 100;
+                    var successRate = (double)queueStats.SentCount / totalProcessed * 100;
                     report.AppendLine($"  Success Rate: {successRate:F2}%");
                 }
                 report.AppendLine();
