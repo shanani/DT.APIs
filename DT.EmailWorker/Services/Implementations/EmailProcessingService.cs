@@ -62,7 +62,7 @@ namespace DT.EmailWorker.Services.Implementations
                 }
 
                 // Process attachments if any
-                if (request.Attachments != null && request.Attachments.Any())
+                if (!string.IsNullOrWhiteSpace(request.Attachments))
                 {
                     var attachmentResult = await ProcessAttachmentsAsync(request.Attachments);
                     if (!attachmentResult.IsSuccess)
@@ -75,6 +75,8 @@ namespace DT.EmailWorker.Services.Implementations
                 }
 
                 // Send email via SMTP
+                var attachmentList = await ParseAttachmentsFromJsonAsync(request.Attachments);
+
                 var sendResult = await _smtpService.SendEmailAsync(
                     request.ToEmails,
                     request.Subject,
@@ -82,7 +84,7 @@ namespace DT.EmailWorker.Services.Implementations
                     request.IsHtml,
                     request.CcEmails,
                     request.BccEmails,
-                    request.Attachments,
+                    attachmentList,
                     cancellationToken);
 
                 stopwatch.Stop();
@@ -151,7 +153,7 @@ namespace DT.EmailWorker.Services.Implementations
                     Subject = templateResult.ProcessedSubject,
                     Body = templateResult.ProcessedBody,
                     IsHtml = true,
-                    Attachments = request.Attachments,
+                    Attachments = JsonSerializer.Serialize(request.Attachments ?? new List<AttachmentData>()),
                     CreatedBy = "TemplateProcessor",
                     RequestSource = "Template"
                 };
@@ -228,19 +230,30 @@ namespace DT.EmailWorker.Services.Implementations
                 }
 
                 // Validate attachments if any
-                if (request.Attachments != null && request.Attachments.Any())
+                if (!string.IsNullOrWhiteSpace(request.Attachments))
                 {
-                    foreach (var attachment in request.Attachments)
+                    try
                     {
-                        if (string.IsNullOrWhiteSpace(attachment.FileName))
+                        var attachments = JsonSerializer.Deserialize<List<AttachmentData>>(request.Attachments);
+                        if (attachments != null)
                         {
-                            result.Warnings.Add("Attachment has no filename");
-                        }
+                            foreach (var attachment in attachments)
+                            {
+                                if (string.IsNullOrWhiteSpace(attachment.FileName))
+                                {
+                                    result.Warnings.Add("Attachment has no filename");
+                                }
 
-                        if (string.IsNullOrWhiteSpace(attachment.Content) && string.IsNullOrWhiteSpace(attachment.FilePath))
-                        {
-                            result.Warnings.Add($"Attachment {attachment.FileName} has no content or file path");
+                                if (string.IsNullOrWhiteSpace(attachment.Content) && string.IsNullOrWhiteSpace(attachment.FilePath))
+                                {
+                                    result.Warnings.Add($"Attachment {attachment.FileName} has no content or file path");
+                                }
+                            }
                         }
+                    }
+                    catch (JsonException)
+                    {
+                        result.Warnings.Add("Invalid attachment data format");
                     }
                 }
 
@@ -312,11 +325,17 @@ namespace DT.EmailWorker.Services.Implementations
             }
         }
 
-        private async Task<EmailProcessingResult> ProcessAttachmentsAsync(List<AttachmentData> attachments)
+        private async Task<EmailProcessingResult> ProcessAttachmentsAsync(string attachmentsJson)
         {
             try
             {
-                if (!attachments.Any())
+                if (string.IsNullOrWhiteSpace(attachmentsJson))
+                {
+                    return new EmailProcessingResult { IsSuccess = true };
+                }
+
+                var attachments = JsonSerializer.Deserialize<List<AttachmentData>>(attachmentsJson);
+                if (attachments == null || !attachments.Any())
                 {
                     return new EmailProcessingResult { IsSuccess = true };
                 }
@@ -340,6 +359,15 @@ namespace DT.EmailWorker.Services.Implementations
                     ErrorMessage = result.HasErrors ? "One or more attachment processing errors occurred" : null
                 };
             }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Error parsing attachment JSON");
+                return new EmailProcessingResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = "Invalid attachment data format"
+                };
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing attachments");
@@ -349,6 +377,26 @@ namespace DT.EmailWorker.Services.Implementations
                     ErrorMessage = ex.Message,
                     Exception = ex
                 };
+            }
+        }
+
+        private async Task<List<AttachmentData>> ParseAttachmentsFromJsonAsync(string? attachmentsJson)
+        {
+            await Task.CompletedTask; // Make async
+
+            if (string.IsNullOrWhiteSpace(attachmentsJson))
+            {
+                return new List<AttachmentData>();
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<List<AttachmentData>>(attachmentsJson) ?? new List<AttachmentData>();
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse attachments JSON");
+                return new List<AttachmentData>();
             }
         }
     }

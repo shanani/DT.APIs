@@ -302,66 +302,19 @@ namespace DT.EmailWorker.Services.Implementations
             }
         }
 
-        public async Task<QueueStatistics> GetQueueStatisticsAsync(CancellationToken cancellationToken = default)
+        public async Task<QueueStatistics> GetQueueStatisticsAsync()
         {
             try
             {
-                var now = DateTime.UtcNow;
-                var oneHourAgo = now.AddHours(-1);
-
                 var stats = new QueueStatistics
                 {
-                    TotalCount = await _context.EmailQueue.CountAsync(cancellationToken),
-                    PendingCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Queued, cancellationToken),
-                    ProcessingCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Processing, cancellationToken),
-                    SentCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Sent, cancellationToken),
-                    FailedCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Failed, cancellationToken),
-                    CancelledCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Cancelled, cancellationToken),
-                    ScheduledCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Scheduled, cancellationToken),
-                    ProcessedLastHour = await _context.EmailQueue.CountAsync(e =>
-                        (e.Status == EmailQueueStatus.Sent || e.Status == EmailQueueStatus.Failed) &&
-                        e.ProcessedAt >= oneHourAgo, cancellationToken),
-                    FailedLastHour = await _context.EmailQueue.CountAsync(e =>
-                        e.Status == EmailQueueStatus.Failed && e.ProcessedAt >= oneHourAgo, cancellationToken),
-                    HighPriorityCount = await _context.EmailQueue.CountAsync(e =>
-                        e.Priority == EmailPriority.High &&
-                        (e.Status == EmailQueueStatus.Queued || e.Status == EmailQueueStatus.Processing), cancellationToken),
-                    NormalPriorityCount = await _context.EmailQueue.CountAsync(e =>
-                        e.Priority == EmailPriority.Normal &&
-                        (e.Status == EmailQueueStatus.Queued || e.Status == EmailQueueStatus.Processing), cancellationToken),
-                    LowPriorityCount = await _context.EmailQueue.CountAsync(e =>
-                        e.Priority == EmailPriority.Low &&
-                        (e.Status == EmailQueueStatus.Queued || e.Status == EmailQueueStatus.Processing), cancellationToken)
+                    TotalCount = await _context.EmailQueue.CountAsync(),
+                    PendingCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Queued),
+                    ProcessingCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Processing),
+                    SentCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Sent),
+                    FailedCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Failed),
+                    LastUpdated = DateTime.UtcNow
                 };
-
-                // Get oldest pending email
-                var oldestPending = await _context.EmailQueue
-                    .Where(e => e.Status == EmailQueueStatus.Queued)
-                    .OrderBy(e => e.CreatedAt)
-                    .FirstOrDefaultAsync(cancellationToken);
-
-                if (oldestPending != null)
-                {
-                    stats.OldestPendingEmail = oldestPending.CreatedAt;
-                }
-
-                // Calculate average processing time
-                var processedEmails = await _context.EmailQueue
-                    .Where(e => e.Status == EmailQueueStatus.Sent &&
-                               e.ProcessingStartedAt != null &&
-                               e.ProcessedAt != null)
-                    .Take(100) // Sample last 100 processed emails
-                    .Select(e => new { e.ProcessingStartedAt, e.ProcessedAt })
-                    .ToListAsync(cancellationToken);
-
-                if (processedEmails.Any())
-                {
-                    var avgMs = processedEmails
-                        .Where(e => e.ProcessingStartedAt.HasValue && e.ProcessedAt.HasValue)
-                        .Average(e => (e.ProcessedAt!.Value - e.ProcessingStartedAt!.Value).TotalMilliseconds);
-
-                    stats.AverageProcessingTimeMs = avgMs;
-                }
 
                 return stats;
             }

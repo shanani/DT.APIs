@@ -73,7 +73,7 @@ namespace DT.EmailWorker.Services.Implementations
                 if (oldLogs.Any())
                 {
                     _context.ProcessingLogs.RemoveRange(oldLogs);
-                    await _context.SaveChangesAsync(cancellationToken);
+                    await _context.SaveChangesAsync();
 
                     _logger.LogInformation("Cleaned up {Count} old processing logs", oldLogs.Count);
                     return oldLogs.Count;
@@ -368,7 +368,7 @@ namespace DT.EmailWorker.Services.Implementations
 
                 if (oldestHistory != null)
                 {
-                    stats.OldestRecord = oldestHistory.SentAt;
+                    stats.OldestRecord = oldestHistory.SentAt ?? DateTime.UtcNow; // Handle nullable DateTime
                 }
 
                 return stats;
@@ -513,12 +513,14 @@ namespace DT.EmailWorker.Services.Implementations
                 analysis.DatabaseSizeBytes = (long)(dbSizeResult * 1024 * 1024 * 1024);
 
                 // Get drive info
-                var connectionString = _context.Database.GetConnectionString();
                 var drive = new DriveInfo(Path.GetPathRoot(Environment.CurrentDirectory)!);
 
                 analysis.FreeDiskSpaceBytes = drive.AvailableFreeSpace;
                 analysis.TotalDiskSpaceBytes = drive.TotalSize;
+                analysis.UsedDiskSpaceBytes = drive.TotalSize - drive.AvailableFreeSpace;
                 analysis.FreeSpacePercent = (double)drive.AvailableFreeSpace / drive.TotalSize * 100;
+                analysis.UsedSpacePercent = 100 - analysis.FreeSpacePercent;
+                analysis.DatabaseSpacePercent = (double)analysis.DatabaseSizeBytes / drive.TotalSize * 100;
 
                 // Estimate reclaimable space
                 var cutoffDate = DateTime.UtcNow.AddDays(-_settings.RetentionDays);
@@ -527,7 +529,30 @@ namespace DT.EmailWorker.Services.Implementations
                 // Rough estimate: 1KB per email history record
                 analysis.EstimatedReclaimableBytes = oldRecordsCount * 1024;
 
-                analysis.DiskSpaceHealthy = analysis.FreeSpacePercent > 20; // Consider healthy if > 20% free
+                // Determine if action needed
+                analysis.IsLowOnSpace = analysis.FreeSpacePercent < 20; // Less than 20% free
+                analysis.RequiresCleanup = analysis.FreeSpacePercent < 10; // Less than 10% free
+
+                // Add recommendations
+                if (analysis.FreeSpacePercent < 5)
+                {
+                    analysis.Recommendations.Add("CRITICAL: Immediate cleanup required - less than 5% disk space remaining");
+                    analysis.Recommendations.Add("Perform aggressive cleanup to free space immediately");
+                }
+                else if (analysis.FreeSpacePercent < 10)
+                {
+                    analysis.Recommendations.Add("WARNING: Low disk space - cleanup recommended");
+                    analysis.Recommendations.Add("Consider archiving old email history records");
+                }
+                else if (analysis.FreeSpacePercent < 20)
+                {
+                    analysis.Recommendations.Add("Consider routine cleanup to maintain performance");
+                }
+
+                if (oldRecordsCount > 1000)
+                {
+                    analysis.Recommendations.Add($"Found {oldRecordsCount} old email records that can be cleaned up");
+                }
 
                 return analysis;
             }
@@ -538,7 +563,7 @@ namespace DT.EmailWorker.Services.Implementations
             }
         }
 
-        public async Task<CleanupSummary> PerformAggressiveCleanupAsync(int retentionDays)
+        public async Task<CleanupSummary> PerformAggressiveCleanupAsync(int targetFreeSpacePercent)
         {
             var summary = new CleanupSummary
             {
@@ -547,7 +572,10 @@ namespace DT.EmailWorker.Services.Implementations
 
             try
             {
-                _logger.LogInformation("Starting aggressive cleanup operation with {RetentionDays} days retention", retentionDays);
+                _logger.LogInformation("Starting aggressive cleanup operation with {TargetFreeSpacePercent}% target free space", targetFreeSpacePercent);
+
+                // Calculate retention days based on target free space
+                int retentionDays = targetFreeSpacePercent > 50 ? 30 : targetFreeSpacePercent > 20 ? 7 : 1;
 
                 // Create backup first if enabled
                 if (_settings.CreateBackupBeforeCleanup)

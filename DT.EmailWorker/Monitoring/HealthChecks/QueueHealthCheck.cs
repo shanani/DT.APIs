@@ -21,7 +21,7 @@ namespace DT.EmailWorker.Monitoring.HealthChecks
             {
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-                var stats = await _queueService.GetQueueStatisticsAsync(cancellationToken);
+                var stats = await _queueService.GetQueueStatisticsAsync();
 
                 stopwatch.Stop();
 
