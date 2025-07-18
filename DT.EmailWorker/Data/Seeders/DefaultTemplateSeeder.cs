@@ -26,8 +26,8 @@ namespace DT.EmailWorker.Data.Seeders
                 {
                     Name = "WelcomeEmail",
                     Category = "Authentication",
-                    Subject = "Welcome to {{CompanyName}}!",
-                    Body = @"
+                    SubjectTemplate = "Welcome to {{CompanyName}}!",
+                    BodyTemplate = @"
 <!DOCTYPE html>
 <html>
 <head>
@@ -74,8 +74,8 @@ namespace DT.EmailWorker.Data.Seeders
                 {
                     Name = "PasswordReset",
                     Category = "Authentication",
-                    Subject = "Reset Your Password - {{CompanyName}}",
-                    Body = @"
+                    SubjectTemplate = "Reset Your Password - {{CompanyName}}",
+                    BodyTemplate = @"
 <!DOCTYPE html>
 <html>
 <head>
@@ -122,8 +122,8 @@ namespace DT.EmailWorker.Data.Seeders
                 {
                     Name = "OrderConfirmation",
                     Category = "Commerce",
-                    Subject = "Order Confirmation #{{OrderNumber}} - {{CompanyName}}",
-                    Body = @"
+                    SubjectTemplate = "Order Confirmation #{{OrderNumber}} - {{CompanyName}}",
+                    BodyTemplate = @"
 <!DOCTYPE html>
 <html>
 <head>
@@ -186,8 +186,8 @@ namespace DT.EmailWorker.Data.Seeders
                 {
                     Name = "SystemNotification",
                     Category = "System",
-                    Subject = "{{NotificationType}} - {{CompanyName}} System Alert",
-                    Body = @"
+                    SubjectTemplate = "{{NotificationType}} - {{CompanyName}} System Alert",
+                    BodyTemplate = @"
 <!DOCTYPE html>
 <html>
 <head>

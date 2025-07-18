@@ -27,8 +27,8 @@ namespace DT.EmailWorker.Core.Engines
                 var result = new TemplateProcessingResult
                 {
                     IsSuccess = true,
-                    ProcessedSubject = ProcessPlaceholders(template.Subject, data),
-                    ProcessedBody = ProcessPlaceholders(template.Body, data)
+                    ProcessedSubject = ProcessPlaceholders(template.SubjectTemplate, data),
+                    ProcessedBody = ProcessPlaceholders(template.BodyTemplate, data)
                 };
 
                 // Process conditional content
@@ -230,14 +230,14 @@ namespace DT.EmailWorker.Core.Engines
         {
             var placeholders = new HashSet<string>();
 
-            if (!string.IsNullOrEmpty(template.Subject))
+            if (!string.IsNullOrEmpty(template.SubjectTemplate))
             {
-                placeholders.UnionWith(template.Subject.ExtractPlaceholders());
+                placeholders.UnionWith(template.SubjectTemplate.ExtractPlaceholders());
             }
 
-            if (!string.IsNullOrEmpty(template.Body))
+            if (!string.IsNullOrEmpty(template.BodyTemplate))
             {
-                placeholders.UnionWith(template.Body.ExtractPlaceholders());
+                placeholders.UnionWith(template.BodyTemplate.ExtractPlaceholders());
             }
 
             return placeholders.ToList();

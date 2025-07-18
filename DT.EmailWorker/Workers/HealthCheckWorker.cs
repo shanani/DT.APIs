@@ -1,4 +1,5 @@
 using DT.EmailWorker.Core.Configuration;
+using DT.EmailWorker.Models.DTOs;
 using DT.EmailWorker.Models.Enums;
 using DT.EmailWorker.Services.Interfaces;
 using Microsoft.Extensions.Options;

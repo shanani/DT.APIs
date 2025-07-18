@@ -1,4 +1,5 @@
 using DT.EmailWorker.Data;
+using DT.EmailWorker.Models.DTOs;
 using DT.EmailWorker.Models.Entities;
 using DT.EmailWorker.Models.Enums;
 using DT.EmailWorker.Repositories.Interfaces;

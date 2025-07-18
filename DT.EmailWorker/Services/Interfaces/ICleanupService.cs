@@ -5,26 +5,18 @@ namespace DT.EmailWorker.Services.Interfaces
     /// </summary>
     public interface ICleanupService
     {
+
+        Task<int> CleanupProcessingLogsAsync(int retentionDays, CancellationToken cancellationToken = default);
+
+        Task<int> CleanupEmailAttachmentsAsync(int retentionDays, CancellationToken cancellationToken = default);
+
         /// <summary>
         /// Clean up old email history records
         /// </summary>
         /// <param name="retentionDays">Number of days to retain</param>
         /// <returns>Number of records cleaned up</returns>
-        Task<int> CleanupEmailHistoryAsync(int retentionDays);
+        Task<int> CleanupEmailHistoryAsync(int retentionDays, CancellationToken cancellationToken = default);
 
-        /// <summary>
-        /// Clean up old processing logs
-        /// </summary>
-        /// <param name="retentionDays">Number of days to retain</param>
-        /// <returns>Number of records cleaned up</returns>
-        Task<int> CleanupProcessingLogsAsync(int retentionDays);
-
-        /// <summary>
-        /// Clean up old email attachments
-        /// </summary>
-        /// <param name="retentionDays">Number of days to retain</param>
-        /// <returns>Number of attachments cleaned up</returns>
-        Task<int> CleanupEmailAttachmentsAsync(int retentionDays);
 
         /// <summary>
         /// Clean up old service status records

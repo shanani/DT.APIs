@@ -30,26 +30,23 @@ namespace DT.EmailWorker.Services.Implementations
             _logger = logger;
         }
 
-        public async Task<int> CleanupEmailHistoryAsync(int retentionDays)
+        public async Task<int> CleanupEmailHistoryAsync(int retentionDays, CancellationToken cancellationToken = default)
         {
             try
             {
                 var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
-
                 var oldRecords = await _context.EmailHistory
                     .Where(h => h.SentAt < cutoffDate)
                     .Take(_settings.MaxRecordsPerCleanup)
-                    .ToListAsync();
+                    .ToListAsync(cancellationToken);  // Also add cancellationToken here
 
                 if (oldRecords.Any())
                 {
                     _context.EmailHistory.RemoveRange(oldRecords);
                     await _context.SaveChangesAsync(cancellationToken);
-
                     _logger.LogInformation("Cleaned up {Count} old email history records", oldRecords.Count);
                     return oldRecords.Count;
                 }
-
                 return 0;
             }
             catch (Exception ex)
@@ -59,7 +56,7 @@ namespace DT.EmailWorker.Services.Implementations
             }
         }
 
-        public async Task<int> CleanupProcessingLogsAsync(int retentionDays)
+        public async Task<int> CleanupProcessingLogsAsync(int retentionDays, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -88,7 +85,7 @@ namespace DT.EmailWorker.Services.Implementations
             }
         }
 
-        public async Task<int> CleanupEmailAttachmentsAsync(int retentionDays)
+        public async Task<int> CleanupEmailAttachmentsAsync(int retentionDays, CancellationToken cancellationToken = default)
         {
             try
             {

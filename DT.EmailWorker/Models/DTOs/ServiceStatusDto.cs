@@ -113,5 +113,8 @@ namespace DT.EmailWorker.Models.DTOs
         /// Additional status information
         /// </summary>
         public Dictionary<string, object> AdditionalInfo { get; set; } = new Dictionary<string, object>();
+        public DateTime StartedAt { get; internal set; }
+        public DateTime UpdatedAt { get; internal set; }
+        public decimal? DiskUsagePercent { get; internal set; }
     }
 }

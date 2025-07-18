@@ -4,6 +4,7 @@ using DT.EmailWorker.Models.Entities;
 using DT.EmailWorker.Models.Enums;
 using DT.EmailWorker.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.Reflection;
@@ -63,15 +64,16 @@ namespace DT.EmailWorker.Services.Implementations
                 var metrics = await GetResourceUsageAsync();
                 serviceStatus.CpuUsagePercent = metrics.CpuUsagePercent;
                 serviceStatus.MemoryUsageMB = metrics.MemoryUsageMB;
-                serviceStatus.UptimeSeconds = (long)metrics.Uptime.TotalSeconds;
+                serviceStatus.DiskUsagePercent = metrics.DiskUsagePercent;
 
-                // Get queue statistics
-                var queueStats = await GetQueueStatisticsAsync();
-                serviceStatus.QueueDepth = queueStats.TotalQueued;
+                // Store additional info as JSON string in LastError field if needed
+                // Note: Entity doesn't have AdditionalInfo property, consider adding it or use LastError for now
+                if (additionalInfo != null && additionalInfo.ContainsKey("error"))
+                {
+                    serviceStatus.LastError = additionalInfo["error"]?.ToString();
+                }
 
                 await _context.SaveChangesAsync();
-
-                _logger.LogDebug("Updated service status to {Status}", status);
             }
             catch (Exception ex)
             {
@@ -88,18 +90,13 @@ namespace DT.EmailWorker.Services.Implementations
                 var serviceStatus = await _context.ServiceStatus
                     .FirstOrDefaultAsync(s => s.ServiceName == _serviceName && s.MachineName == machineName);
 
-                if (serviceStatus == null)
+                return serviceStatus != null ? MapToServiceStatusDto(serviceStatus) : new ServiceStatusDto
                 {
-                    return new ServiceStatusDto
-                    {
-                        ServiceName = _serviceName,
-                        MachineName = machineName,
-                        Status = ServiceHealthStatus.Offline,
-                        StatusDescription = "Service not found in database"
-                    };
-                }
-
-                return MapToServiceStatusDto(serviceStatus);
+                    ServiceName = _serviceName,
+                    MachineName = machineName,
+                    Status = ServiceHealthStatus.Unknown,
+                    ServiceVersion = _serviceVersion
+                };
             }
             catch (Exception ex)
             {
@@ -152,30 +149,26 @@ namespace DT.EmailWorker.Services.Implementations
 
                 stopwatch.Stop();
 
-                return new HealthCheckResult
+                var data = new Dictionary<string, object>
                 {
-                    IsHealthy = true,
-                    ComponentName = "Database",
-                    Message = "Database is accessible",
-                    ResponseTime = stopwatch.Elapsed,
-                    Details = new Dictionary<string, object>
-                    {
-                        ["ConnectionString"] = _context.Database.GetConnectionString()?.Split(';').FirstOrDefault() ?? "Unknown",
-                        ["Provider"] = _context.Database.ProviderName ?? "Unknown"
-                    }
+                    ["ResponseTimeMs"] = stopwatch.ElapsedMilliseconds,
+                    ["ConnectionString"] = _context.Database.GetConnectionString()?.Split(';').FirstOrDefault() ?? "Unknown",
+                    ["Provider"] = _context.Database.ProviderName ?? "Unknown"
                 };
+
+                return HealthCheckResult.Healthy("Database is accessible", data);
             }
             catch (Exception ex)
             {
                 stopwatch.Stop();
-                return new HealthCheckResult
+
+                var data = new Dictionary<string, object>
                 {
-                    IsHealthy = false,
-                    ComponentName = "Database",
-                    Message = "Database connection failed",
-                    ResponseTime = stopwatch.Elapsed,
-                    Exception = ex
+                    ["ResponseTimeMs"] = stopwatch.ElapsedMilliseconds,
+                    ["Error"] = ex.Message
                 };
+
+                return HealthCheckResult.Unhealthy("Database connection failed", ex, data);
             }
         }
 
@@ -199,31 +192,27 @@ namespace DT.EmailWorker.Services.Implementations
                 await client.DisconnectAsync(true);
                 stopwatch.Stop();
 
-                return new HealthCheckResult
+                var data = new Dictionary<string, object>
                 {
-                    IsHealthy = true,
-                    ComponentName = "SMTP",
-                    Message = "SMTP server is accessible",
-                    ResponseTime = stopwatch.Elapsed,
-                    Details = new Dictionary<string, object>
-                    {
-                        ["Server"] = server ?? "Unknown",
-                        ["Port"] = port,
-                        ["AuthenticationRequired"] = !string.IsNullOrEmpty(smtpSettings["Username"])
-                    }
+                    ["ResponseTimeMs"] = stopwatch.ElapsedMilliseconds,
+                    ["Server"] = server ?? "Unknown",
+                    ["Port"] = port,
+                    ["AuthenticationRequired"] = !string.IsNullOrEmpty(smtpSettings["Username"])
                 };
+
+                return HealthCheckResult.Healthy("SMTP server is accessible", data);
             }
             catch (Exception ex)
             {
                 stopwatch.Stop();
-                return new HealthCheckResult
+
+                var data = new Dictionary<string, object>
                 {
-                    IsHealthy = false,
-                    ComponentName = "SMTP",
-                    Message = "SMTP server connection failed",
-                    ResponseTime = stopwatch.Elapsed,
-                    Exception = ex
+                    ["ResponseTimeMs"] = stopwatch.ElapsedMilliseconds,
+                    ["Error"] = ex.Message
                 };
+
+                return HealthCheckResult.Unhealthy("SMTP server connection failed", ex, data);
             }
         }
 
@@ -240,31 +229,31 @@ namespace DT.EmailWorker.Services.Implementations
 
                 var isHealthy = queueCount < 10000; // Alert if queue gets too large
 
-                return new HealthCheckResult
+                var data = new Dictionary<string, object>
                 {
-                    IsHealthy = isHealthy,
-                    ComponentName = "Queue",
-                    Message = isHealthy ? "Queue is healthy" : "Queue depth is high",
-                    ResponseTime = stopwatch.Elapsed,
-                    Details = new Dictionary<string, object>
-                    {
-                        ["TotalQueueCount"] = queueCount,
-                        ["ProcessingCount"] = processingCount,
-                        ["QueueHealthy"] = isHealthy
-                    }
+                    ["ResponseTimeMs"] = stopwatch.ElapsedMilliseconds,
+                    ["TotalQueueCount"] = queueCount,
+                    ["ProcessingCount"] = processingCount,
+                    ["QueueHealthy"] = isHealthy
                 };
+
+                var message = isHealthy ? "Queue is healthy" : "Queue depth is high";
+
+                return isHealthy
+                    ? HealthCheckResult.Healthy(message, data)
+                    : HealthCheckResult.Degraded(message, data: data);
             }
             catch (Exception ex)
             {
                 stopwatch.Stop();
-                return new HealthCheckResult
+
+                var data = new Dictionary<string, object>
                 {
-                    IsHealthy = false,
-                    ComponentName = "Queue",
-                    Message = "Queue health check failed",
-                    ResponseTime = stopwatch.Elapsed,
-                    Exception = ex
+                    ["ResponseTimeMs"] = stopwatch.ElapsedMilliseconds,
+                    ["Error"] = ex.Message
                 };
+
+                return HealthCheckResult.Unhealthy("Queue health check failed", ex, data);
             }
         }
 
@@ -282,18 +271,19 @@ namespace DT.EmailWorker.Services.Implementations
 
                 result.ComponentResults.AddRange(new[] { databaseCheck, smtpCheck, queueCheck });
 
-                // Determine overall status
-                if (result.ComponentResults.All(r => r.IsHealthy))
+                // Determine overall status based on Microsoft's HealthStatus enum
+                if (result.ComponentResults.All(r => r.Status == HealthStatus.Healthy))
                 {
                     result.OverallStatus = ServiceHealthStatus.Healthy;
                     result.Summary = "All components are healthy";
                 }
-                else if (result.ComponentResults.Any(r => !r.IsHealthy && r.ComponentName == "Database"))
+                else if (result.ComponentResults.Any(r => r.Status == HealthStatus.Unhealthy &&
+                    r.Description?.Contains("Database", StringComparison.OrdinalIgnoreCase) == true))
                 {
                     result.OverallStatus = ServiceHealthStatus.Critical;
                     result.Summary = "Critical: Database is unavailable";
                 }
-                else if (result.ComponentResults.Count(r => !r.IsHealthy) == 1)
+                else if (result.ComponentResults.Count(r => r.Status == HealthStatus.Unhealthy) == 1)
                 {
                     result.OverallStatus = ServiceHealthStatus.Warning;
                     result.Summary = "Warning: Some components are unhealthy";
@@ -314,22 +304,11 @@ namespace DT.EmailWorker.Services.Implementations
                 stopwatch.Stop();
                 _logger.LogError(ex, "Error performing health check");
 
-                return new OverallHealthResult
-                {
-                    OverallStatus = ServiceHealthStatus.Critical,
-                    Summary = "Health check failed with exception",
-                    TotalCheckTime = stopwatch.Elapsed,
-                    ComponentResults = new List<HealthCheckResult>
-                    {
-                        new HealthCheckResult
-                        {
-                            IsHealthy = false,
-                            ComponentName = "HealthCheck",
-                            Message = "Health check process failed",
-                            Exception = ex
-                        }
-                    }
-                };
+                result.OverallStatus = ServiceHealthStatus.Critical;
+                result.Summary = "Health check system failure";
+                result.TotalCheckTime = stopwatch.Elapsed;
+
+                return result;
             }
         }
 
@@ -343,19 +322,16 @@ namespace DT.EmailWorker.Services.Implementations
 
                 if (serviceStatus != null)
                 {
-                    serviceStatus.EmailsProcessedPerHour = metrics.EmailsProcessedLastHour;
-                    serviceStatus.ErrorRate = metrics.EmailsFailedLastHour > 0 && metrics.EmailsProcessedLastHour > 0
-                        ? (decimal)metrics.EmailsFailedLastHour / metrics.EmailsProcessedLastHour * 100
-                        : 0;
-                    serviceStatus.AverageProcessingTimeMs = (decimal)metrics.AverageProcessingTimeMs;
-                    serviceStatus.QueueDepth = metrics.CurrentQueueDepth;
-                    serviceStatus.CurrentActiveWorkers = metrics.ActiveWorkers;
                     serviceStatus.CpuUsagePercent = metrics.CpuUsagePercent;
                     serviceStatus.MemoryUsageMB = metrics.MemoryUsageMB;
+                    serviceStatus.DiskUsagePercent = metrics.DiskUsagePercent;
                     serviceStatus.UpdatedAt = DateTime.UtcNow;
 
                     await _context.SaveChangesAsync();
                 }
+
+                _logger.LogDebug("Performance metrics updated: CPU {CPU}%, Memory {Memory}MB, Queue {Queue}",
+                    metrics.CpuUsagePercent, metrics.MemoryUsageMB, metrics.CurrentQueueDepth);
             }
             catch (Exception ex)
             {
@@ -369,31 +345,26 @@ namespace DT.EmailWorker.Services.Implementations
             try
             {
                 var startTime = DateTime.UtcNow.AddHours(-hours);
+                var endTime = DateTime.UtcNow;
 
-                var emailHistory = await _context.EmailHistory
-                    .Where(h => h.CreatedAt >= startTime)
-                    .ToListAsync();
+                var processedEmails = await _context.EmailHistory
+                    .Where(h => h.SentAt >= startTime && h.SentAt <= endTime)
+                    .CountAsync();
 
-                var totalProcessed = emailHistory.Count;
-                var totalFailed = emailHistory.Count(h => h.Status == EmailQueueStatus.Failed);
-                var successRate = totalProcessed > 0 ? (double)(totalProcessed - totalFailed) / totalProcessed * 100 : 100;
+                var failedEmails = await _context.ProcessingLogs
+                    .Where(l => l.LogLevel == LogLevel.Error && l.CreatedAt >= startTime && l.CreatedAt <= endTime)
+                    .CountAsync();
 
-                var processingTimes = emailHistory
-                    .Where(h => h.ProcessingTimeMs.HasValue)
-                    .Select(h => h.ProcessingTimeMs.Value)
-                    .ToList();
+                var successRate = processedEmails > 0 ? ((double)(processedEmails - failedEmails) / processedEmails) * 100 : 100;
 
                 return new PerformanceMetricsSummary
                 {
-                    TotalEmailsProcessed = totalProcessed,
-                    TotalEmailsFailed = totalFailed,
+                    TotalEmailsProcessed = processedEmails,
+                    TotalEmailsFailed = failedEmails,
                     SuccessRate = successRate,
-                    AverageProcessingTimeMs = processingTimes.Any() ? processingTimes.Average() : 0,
-                    MaxProcessingTimeMs = processingTimes.Any() ? processingTimes.Max() : 0,
-                    MinProcessingTimeMs = processingTimes.Any() ? processingTimes.Min() : 0,
-                    AverageEmailsPerHour = totalProcessed > 0 ? (double)totalProcessed / hours : 0,
+                    AverageEmailsPerHour = hours > 0 ? (double)processedEmails / hours : 0,
                     PeriodStart = startTime,
-                    PeriodEnd = DateTime.UtcNow
+                    PeriodEnd = endTime
                 };
             }
             catch (Exception ex)
@@ -414,8 +385,7 @@ namespace DT.EmailWorker.Services.Implementations
                     Message = error,
                     Exception = exception,
                     QueueId = queueId,
-                    WorkerId = workerId,
-                    ProcessingStep = "Error"
+                    WorkerId = workerId
                 };
 
                 _context.ProcessingLogs.Add(log);
@@ -498,20 +468,13 @@ namespace DT.EmailWorker.Services.Implementations
             try
             {
                 // Log the alert
-                var logLevel = alertLevel switch
-                {
-                    AlertLevel.Critical => LogLevel.Critical,
-                    AlertLevel.Error => LogLevel.Error,
-                    AlertLevel.Warning => LogLevel.Warning,
-                    _ => LogLevel.Information
-                };
+                _logger.LogWarning("Health Alert [{Level}]: {Message} - Details: {Details}",
+                    alertLevel, message, details != null ? System.Text.Json.JsonSerializer.Serialize(details) : "None");
 
-                _logger.Log(logLevel, "Health Alert [{AlertLevel}]: {Message}", alertLevel, message);
+                // Here you would implement actual alerting (email, SMS, webhook, etc.)
+                // For now, we'll just log it
 
-                // Could implement email/SMS notifications here
-                // For now, just log to processing logs
-                await LogProcessingErrorAsync(null, $"Health Alert [{alertLevel}]: {message}",
-                    details != null ? System.Text.Json.JsonSerializer.Serialize(details) : null);
+                await Task.CompletedTask;
             }
             catch (Exception ex)
             {
@@ -526,16 +489,17 @@ namespace DT.EmailWorker.Services.Implementations
             {
                 var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
 
-                var oldRecords = await _context.ServiceStatus
-                    .Where(s => s.UpdatedAt < cutoffDate)
+                var recordsToDelete = await _context.ProcessingLogs
+                    .Where(l => l.CreatedAt < cutoffDate)
                     .ToListAsync();
 
-                _context.ServiceStatus.RemoveRange(oldRecords);
-                await _context.SaveChangesAsync();
+                if (recordsToDelete.Any())
+                {
+                    _context.ProcessingLogs.RemoveRange(recordsToDelete);
+                    await _context.SaveChangesAsync();
+                }
 
-                _logger.LogInformation("Cleaned up {Count} old health records", oldRecords.Count);
-
-                return oldRecords.Count;
+                return recordsToDelete.Count;
             }
             catch (Exception ex)
             {
@@ -551,43 +515,15 @@ namespace DT.EmailWorker.Services.Implementations
                 ServiceName = serviceStatus.ServiceName,
                 MachineName = serviceStatus.MachineName,
                 Status = serviceStatus.Status,
-                StatusDescription = GetStatusDescription(serviceStatus.Status),
+                ServiceVersion = serviceStatus.ServiceVersion,
+                StartedAt = serviceStatus.StartedAt,
                 LastHeartbeat = serviceStatus.LastHeartbeat,
-                QueueDepth = serviceStatus.QueueDepth,
-                EmailsProcessedPerHour = serviceStatus.EmailsProcessedPerHour,
-                ErrorRate = serviceStatus.ErrorRate,
-                AverageProcessingTimeMs = serviceStatus.AverageProcessingTimeMs,
+                UpdatedAt = serviceStatus.UpdatedAt,
                 CpuUsagePercent = serviceStatus.CpuUsagePercent,
                 MemoryUsageMB = serviceStatus.MemoryUsageMB,
-                MaxConcurrentWorkers = serviceStatus.MaxConcurrentWorkers,
-                CurrentActiveWorkers = serviceStatus.CurrentActiveWorkers,
-                ServiceVersion = serviceStatus.ServiceVersion,
-                Uptime = TimeSpan.FromSeconds(serviceStatus.UptimeSeconds),
-                TotalEmailsProcessed = serviceStatus.TotalEmailsProcessed,
-                TotalEmailsFailed = serviceStatus.TotalEmailsFailed,
-                LastError = serviceStatus.LastError,
-                LastErrorAt = serviceStatus.LastErrorAt
+                DiskUsagePercent = serviceStatus.DiskUsagePercent,
+                AdditionalInfo = serviceStatus.AdditionalInfo
             };
-        }
-
-        private static string GetStatusDescription(ServiceHealthStatus status)
-        {
-            return status switch
-            {
-                ServiceHealthStatus.Healthy => "Service is operating normally",
-                ServiceHealthStatus.Warning => "Service has minor issues but is operational",
-                ServiceHealthStatus.Critical => "Service has critical issues affecting functionality",
-                ServiceHealthStatus.Offline => "Service is offline or unreachable",
-                _ => "Unknown status"
-            };
-        }
-
-        private async Task<QueueStatistics> GetQueueStatisticsAsync()
-        {
-            var queuedCount = await _context.EmailQueue.CountAsync(e => e.Status == EmailQueueStatus.Queued);
-            return new QueueStatistics { TotalQueued = queuedCount };
         }
     }
-
-    
 }

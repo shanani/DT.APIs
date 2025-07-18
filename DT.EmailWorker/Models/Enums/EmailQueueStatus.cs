@@ -33,6 +33,7 @@ namespace DT.EmailWorker.Models.Enums
         /// <summary>
         /// Email is scheduled for future delivery
         /// </summary>
-        Scheduled = 5
+        Scheduled = 5,
+        Pending = 6
     }
 }

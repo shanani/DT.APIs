@@ -74,24 +74,14 @@ namespace DT.EmailWorker.Services.Implementations
                     }
                 }
 
-                // Send email via SMTP
-                var attachmentList = await ParseAttachmentsFromJsonAsync(request.Attachments);
-
-                var sendResult = await _smtpService.SendEmailAsync(
-                    request.ToEmails,
-                    request.Subject,
-                    request.Body,
-                    request.IsHtml,
-                    request.CcEmails,
-                    request.BccEmails,
-                    attachmentList,
-                    cancellationToken);
+                // Send email via SMTP - FIXED: Handle the bool return type
+                var sendSuccess = await _smtpService.SendEmailAsync(request);
 
                 stopwatch.Stop();
 
-                result.IsSuccess = sendResult.IsSuccess;
-                result.ErrorMessage = sendResult.ErrorMessage;
-                result.MessageId = sendResult.MessageId;
+                result.IsSuccess = sendSuccess;
+                result.ErrorMessage = sendSuccess ? null : "SMTP send failed";
+                result.MessageId = sendSuccess ? Guid.NewGuid().ToString() : null; // Generate a message ID if successful
                 result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
 
                 if (result.IsSuccess)

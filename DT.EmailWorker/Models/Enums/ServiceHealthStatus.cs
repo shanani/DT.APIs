@@ -23,6 +23,7 @@ namespace DT.EmailWorker.Models.Enums
         /// <summary>
         /// Service is offline or unreachable
         /// </summary>
-        Offline = 4
+        Offline = 4,
+        Unknown = 5
     }
 }

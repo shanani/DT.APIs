@@ -165,5 +165,6 @@ namespace DT.EmailWorker.Models.Entities
         /// Processing logs for this email
         /// </summary>
         public virtual ICollection<ProcessingLog> ProcessingLogs { get; set; } = new List<ProcessingLog>();
+        public DateTime SentAt { get; internal set; }
     }
 }

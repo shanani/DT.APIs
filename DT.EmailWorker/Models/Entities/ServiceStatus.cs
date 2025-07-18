@@ -134,5 +134,6 @@ namespace DT.EmailWorker.Models.Entities
         /// Service uptime in seconds
         /// </summary>
         public long UptimeSeconds { get; set; } = 0;
+        public Dictionary<string, object> AdditionalInfo { get; internal set; }
     }
 }

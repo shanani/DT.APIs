@@ -203,8 +203,7 @@ namespace DT.EmailWorker.Services.Implementations
                 existingTemplate.Description = template.Description;
                 existingTemplate.SubjectTemplate = template.SubjectTemplate;
                 existingTemplate.BodyTemplate = template.BodyTemplate;
-                existingTemplate.IsActive = template.IsActive;
-                existingTemplate.Tags = template.Tags;
+                existingTemplate.IsActive = template.IsActive;                
                 existingTemplate.UpdatedAt = DateTime.UtcNow;
 
                 await _context.SaveChangesAsync(cancellationToken);

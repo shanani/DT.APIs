@@ -29,6 +29,9 @@ namespace DT.EmailWorker.Services.Implementations
             _logger = logger;
         }
 
+
+
+
         public async Task<bool> SendEmailAsync(EmailProcessingRequest request)
         {
             try
