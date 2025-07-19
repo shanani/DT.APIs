@@ -1,14 +1,26 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using System.Text.RegularExpressions;
 
 namespace DT.EmailWorker.Core.Engines
 {
     /// <summary>
     /// Content ID (CID) image processor for inline email images
+    /// Converts base64 inline images to CID attachments for better email client compatibility
     /// </summary>
     public class CidImageProcessor
     {
         private readonly ILogger<CidImageProcessor> _logger;
+
+        // Regex patterns for detecting different image sources
+        private static readonly Regex Base64ImageRegex = new(
+            @"src\s*=\s*[""']data:image\/([^;]+);base64,([^""']+)[""']",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled
+        );
+
+        private static readonly Regex BackgroundImageRegex = new(
+            @"background(?:-image)?\s*:\s*url\s*\(\s*[""']?data:image\/([^;]+);base64,([^)""']+)[""']?\s*\)",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled
+        );
 
         public CidImageProcessor(ILogger<CidImageProcessor> logger)
         {
@@ -16,9 +28,10 @@ namespace DT.EmailWorker.Core.Engines
         }
 
         /// <summary>
-        /// Process images and convert to CID references
+        /// Process HTML content and convert all base64 images to CID references
+        /// This is the main entry point for converting inline base64 images
         /// </summary>
-        public async Task<CidProcessingResult> ProcessImagesAsync(string htmlContent, List<ImageAttachment> images)
+        public async Task<CidProcessingResult> ProcessImagesAsync(string htmlContent, List<ImageAttachment>? existingImages = null)
         {
             var result = new CidProcessingResult
             {
@@ -26,7 +39,7 @@ namespace DT.EmailWorker.Core.Engines
                 CidMappings = new Dictionary<string, string>()
             };
 
-            if (string.IsNullOrEmpty(htmlContent) || images == null || !images.Any())
+            if (string.IsNullOrEmpty(htmlContent))
             {
                 result.IsSuccess = true;
                 return result;
@@ -34,30 +47,51 @@ namespace DT.EmailWorker.Core.Engines
 
             try
             {
-                _logger.LogDebug("Processing {Count} images for CID embedding", images.Count);
+                _logger.LogDebug("Starting CID image processing for HTML content");
 
+                // Step 1: Extract all base64 images from HTML
+                var extractedImages = ExtractBase64Images(htmlContent);
+
+                // Step 2: Combine with existing images if provided
+                var allImages = new List<ImageAttachment>();
+                if (existingImages?.Any() == true)
+                {
+                    allImages.AddRange(existingImages);
+                }
+                allImages.AddRange(extractedImages);
+
+                if (!allImages.Any())
+                {
+                    _logger.LogDebug("No images found to process");
+                    result.IsSuccess = true;
+                    return result;
+                }
+
+                _logger.LogDebug("Processing {Count} images for CID conversion", allImages.Count);
+
+                // Step 3: Convert each image to CID
                 var processedHtml = htmlContent;
                 var cidCounter = 1;
 
-                foreach (var image in images)
+                foreach (var image in allImages)
                 {
+                    // Validate image before processing
+                    var validation = ValidateImage(image);
+                    if (!validation.IsValid)
+                    {
+                        _logger.LogWarning("Skipping invalid image {FileName}: {Error}",
+                            image.FileName, validation.ErrorMessage);
+                        continue;
+                    }
+
+                    // Generate unique CID
                     var cidId = $"image{cidCounter}@emailworker.local";
                     var cidReference = $"cid:{cidId}";
 
-                    // Replace image sources with CID references
-                    if (!string.IsNullOrEmpty(image.OriginalSrc))
-                    {
-                        // Replace specific src attributes
-                        var pattern = $@"src\s*=\s*[""']{Regex.Escape(image.OriginalSrc)}[""']";
-                        processedHtml = Regex.Replace(processedHtml, pattern, $"src=\"{cidReference}\"", RegexOptions.IgnoreCase);
-                    }
-                    else if (!string.IsNullOrEmpty(image.FileName))
-                    {
-                        // Replace by filename
-                        var pattern = $@"src\s*=\s*[""'][^""']*{Regex.Escape(image.FileName)}[""']";
-                        processedHtml = Regex.Replace(processedHtml, pattern, $"src=\"{cidReference}\"", RegexOptions.IgnoreCase);
-                    }
+                    // Replace base64 sources with CID references
+                    processedHtml = ReplaceImageWithCid(processedHtml, image, cidReference);
 
+                    // Track the mapping
                     result.CidMappings[cidId] = image.FileName;
                     result.ProcessedImages.Add(new ProcessedCidImage
                     {
@@ -74,66 +108,115 @@ namespace DT.EmailWorker.Core.Engines
                 result.ProcessedHtml = processedHtml;
                 result.IsSuccess = true;
 
-                _logger.LogDebug("CID processing completed successfully. Processed {Count} images", result.ProcessedImages.Count);
+                _logger.LogDebug("CID processing completed successfully. Processed {Count} images",
+                    result.ProcessedImages.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to process CID images");
+                _logger.LogError(ex, "Failed to process images for CID conversion");
                 result.IsSuccess = false;
-                result.ErrorMessage = ex.Message;
+                result.ErrorMessage = $"CID processing failed: {ex.Message}";
             }
 
             return result;
         }
 
         /// <summary>
-        /// Extract image references from HTML
+        /// Extract all base64 images from HTML content
+        /// Supports both img src and CSS background-image properties
         /// </summary>
-        public List<string> ExtractImageReferences(string htmlContent)
+        public List<ImageAttachment> ExtractBase64Images(string htmlContent)
         {
-            var imageRefs = new List<string>();
+            var images = new List<ImageAttachment>();
 
             if (string.IsNullOrEmpty(htmlContent))
-                return imageRefs;
+                return images;
 
             try
             {
-                // Extract img src attributes
-                var imgPattern = @"<img[^>]+src\s*=\s*[""']([^""']+)[""'][^>]*>";
-                var matches = Regex.Matches(htmlContent, imgPattern, RegexOptions.IgnoreCase);
-
-                foreach (Match match in matches)
+                // Extract from img src attributes
+                var imgMatches = Base64ImageRegex.Matches(htmlContent);
+                foreach (Match match in imgMatches)
                 {
-                    var src = match.Groups[1].Value;
-                    if (!string.IsNullOrEmpty(src) && !src.StartsWith("http") && !src.StartsWith("cid:"))
+                    var contentType = $"image/{match.Groups[1].Value}";
+                    var base64Content = match.Groups[2].Value;
+                    var fileName = GenerateFileName(contentType);
+
+                    images.Add(new ImageAttachment
                     {
-                        imageRefs.Add(src);
-                    }
+                        FileName = fileName,
+                        ContentType = contentType,
+                        Content = base64Content,
+                        OriginalSrc = match.Value
+                    });
                 }
 
-                // Extract background images from CSS
-                var bgPattern = @"background-image\s*:\s*url\s*\(\s*[""']?([^""'\)]+)[""']?\s*\)";
-                var bgMatches = Regex.Matches(htmlContent, bgPattern, RegexOptions.IgnoreCase);
-
+                // Extract from CSS background-image properties
+                var bgMatches = BackgroundImageRegex.Matches(htmlContent);
                 foreach (Match match in bgMatches)
                 {
-                    var src = match.Groups[1].Value;
-                    if (!string.IsNullOrEmpty(src) && !src.StartsWith("http") && !src.StartsWith("cid:"))
+                    var contentType = $"image/{match.Groups[1].Value}";
+                    var base64Content = match.Groups[2].Value;
+                    var fileName = GenerateFileName(contentType);
+
+                    images.Add(new ImageAttachment
                     {
-                        imageRefs.Add(src);
-                    }
+                        FileName = fileName,
+                        ContentType = contentType,
+                        Content = base64Content,
+                        OriginalSrc = match.Value
+                    });
+                }
+
+                _logger.LogDebug("Extracted {Count} base64 images from HTML", images.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to extract base64 images from HTML");
+            }
+
+            return images;
+        }
+
+        /// <summary>
+        /// Replace image references in HTML with CID references
+        /// CRITICAL FIX: Replace only the specific image, not all images
+        /// </summary>
+        private string ReplaceImageWithCid(string htmlContent, ImageAttachment image, string cidReference)
+        {
+            var processedHtml = htmlContent;
+
+            try
+            {
+                // 🚀 CRITICAL FIX: Replace only the EXACT base64 content for this specific image
+                if (!string.IsNullOrEmpty(image.OriginalSrc))
+                {
+                    // Replace the exact match only
+                    processedHtml = processedHtml.Replace(image.OriginalSrc, $"src=\"{cidReference}\"");
+                }
+                else if (!string.IsNullOrEmpty(image.Content))
+                {
+                    // Replace the specific base64 content for this image only
+                    var specificBase64Pattern = $@"src\s*=\s*[""']data:image\/[^;]+;base64,{Regex.Escape(image.Content)}[""']";
+                    processedHtml = Regex.Replace(processedHtml, specificBase64Pattern, $"src=\"{cidReference}\"",
+                        RegexOptions.IgnoreCase);
+
+                    // Also handle background images with this specific base64
+                    var specificBgPattern = $@"background(?:-image)?\s*:\s*url\s*\(\s*[""']?data:image\/[^;]+;base64,{Regex.Escape(image.Content)}[""']?\s*\)";
+                    processedHtml = Regex.Replace(processedHtml, specificBgPattern, $"background-image: url({cidReference})",
+                        RegexOptions.IgnoreCase);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to extract image references");
+                _logger.LogWarning(ex, "Failed to replace image {FileName} with CID reference", image.FileName);
             }
 
-            return imageRefs.Distinct().ToList();
+            return processedHtml;
         }
 
         /// <summary>
-        /// Validate image content
+        /// Validate image attachment for CID processing
         /// </summary>
         public ImageValidationResult ValidateImage(ImageAttachment image)
         {
@@ -209,6 +292,25 @@ namespace DT.EmailWorker.Core.Engines
         }
 
         /// <summary>
+        /// Generate appropriate filename for image based on content type
+        /// </summary>
+        private string GenerateFileName(string contentType)
+        {
+            var extension = contentType.ToLowerInvariant() switch
+            {
+                "image/jpeg" or "image/jpg" => "jpg",
+                "image/png" => "png",
+                "image/gif" => "gif",
+                "image/bmp" => "bmp",
+                "image/webp" => "webp",
+                "image/svg+xml" => "svg",
+                _ => "img"
+            };
+
+            return $"inline_image_{Guid.NewGuid():N}.{extension}";
+        }
+
+        /// <summary>
         /// Check if content type is valid for images
         /// </summary>
         private bool IsValidImageContentType(string contentType)
@@ -223,7 +325,7 @@ namespace DT.EmailWorker.Core.Engines
         }
 
         /// <summary>
-        /// Validate image file signature
+        /// Validate image file signature against content type
         /// </summary>
         private bool ValidateImageSignature(byte[] bytes, string contentType)
         {
@@ -269,7 +371,7 @@ namespace DT.EmailWorker.Core.Engines
     }
 
     /// <summary>
-    /// Processed CID image
+    /// Processed CID image result
     /// </summary>
     public class ProcessedCidImage
     {
@@ -281,7 +383,7 @@ namespace DT.EmailWorker.Core.Engines
     }
 
     /// <summary>
-    /// CID processing result
+    /// CID processing result container
     /// </summary>
     public class CidProcessingResult
     {

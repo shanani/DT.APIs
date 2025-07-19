@@ -1,11 +1,12 @@
-using DT.EmailWorker.Data;
-using DT.EmailWorker.Services.Interfaces;
-using DT.EmailWorker.Services.Implementations;
-using DT.EmailWorker.Repositories.Interfaces;
-using DT.EmailWorker.Repositories.Implementations;
 using DT.EmailWorker.Core.Configuration;
+using DT.EmailWorker.Core.Engines;
 using DT.EmailWorker.Core.Utilities;
+using DT.EmailWorker.Data;
 using DT.EmailWorker.Monitoring.HealthChecks;
+using DT.EmailWorker.Repositories.Implementations;
+using DT.EmailWorker.Repositories.Interfaces;
+using DT.EmailWorker.Services.Implementations;
+using DT.EmailWorker.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,9 +41,12 @@ namespace DT.EmailWorker.Core.Extensions
             services.AddScoped<IProcessingLogRepository, ProcessingLogRepository>();
 
             // Services
+            services.AddScoped<CidImageProcessor>();
+
             services.AddScoped<IEmailQueueService, EmailQueueService>();
             services.AddScoped<IEmailProcessingService, EmailProcessingService>();
             services.AddScoped<ITemplateService, TemplateService>();
+            
             services.AddScoped<ISmtpService, SmtpService>();
             services.AddScoped<ISchedulingService, SchedulingService>();
             services.AddScoped<IHealthService, HealthService>();
