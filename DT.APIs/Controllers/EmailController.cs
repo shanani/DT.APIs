@@ -8,7 +8,7 @@ namespace DT.APIs.Controllers
 {
     [Authorize]
     [ApiController]
-    [Route("api/email")]
+    [Route("email")]
     public class EmailController : ControllerBase
 
     {

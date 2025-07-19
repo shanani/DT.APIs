@@ -12,7 +12,7 @@ namespace DT.APIs.Controllers
 {
     [Authorize]
     [ApiController]
-    [Route("api/ad")]
+    [Route("ad")]
     public class ADController : ControllerBase
     {
 
