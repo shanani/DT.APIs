@@ -8,12 +8,12 @@ namespace DT.APIs.Controllers
     [Authorize]
     [ApiController]
     [Route("api/email-queue")]
-    public class EmailQueueController : ControllerBase
+    public class EmailController : ControllerBase
     {
         private readonly IEmailQueueService _emailQueueService;
-        private readonly ILogger<EmailQueueController> _logger;
+        private readonly ILogger<EmailController> _logger;
 
-        public EmailQueueController(IEmailQueueService emailQueueService, ILogger<EmailQueueController> logger)
+        public EmailController(IEmailQueueService emailQueueService, ILogger<EmailController> logger)
         {
             _emailQueueService = emailQueueService;
             _logger = logger;

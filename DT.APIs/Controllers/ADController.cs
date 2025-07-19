@@ -13,10 +13,10 @@ namespace DT.APIs.Controllers
     [Authorize]
     [ApiController]
     [Route("api")]
-    public class HUBController : ControllerBase
+    public class ADController : ControllerBase
     {
 
-        private readonly ILogger<HUBController> _logger;
+        private readonly ILogger<ADController> _logger;
 
         private readonly string _connectionString;
 
@@ -25,7 +25,7 @@ namespace DT.APIs.Controllers
         private readonly EmailService _emailService;
 
 
-        public HUBController(ILogger<HUBController> logger, IConfiguration configuration, EmailService emailService)
+        public ADController(ILogger<ADController> logger, IConfiguration configuration, EmailService emailService)
         {
             _logger = logger;
             _connectionString = configuration.GetConnectionString("HubDbConn")!;
