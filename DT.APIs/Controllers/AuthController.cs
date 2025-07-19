@@ -15,82 +15,84 @@ namespace DT.APIs.Controllers
     [Route("auth")]
     public class AuthController : ControllerBase
     {
-        private readonly AppDbContext _context;
         private readonly IConfiguration _configuration;
+        private readonly ILogger<AuthController> _logger;
 
-        public AuthController(AppDbContext context, IConfiguration configuration)
+        public AuthController(IConfiguration configuration, ILogger<AuthController> logger)
         {
-            _context = context;
             _configuration = configuration;
+            _logger = logger;
         }
 
-
         [HttpPost("get-token")]
-        [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public IActionResult GetToken([FromBody] LoginModel model)
         {
-            var apiUser = GetConfig("ACTIVE_DIRECTORY_USER");
-            var apiPass = GetConfig("ACTIVE_DIRECTORY_PASSWORD");
-            if (apiUser == model.Username && apiPass == model.Password)
+            try
             {
-                string token = GenerateJwtToken(model.Username);
+                if (model == null || string.IsNullOrEmpty(model.Username) || string.IsNullOrEmpty(model.Password))
+                {
+                    return BadRequest("Username and password are required.");
+                }
 
-                return Ok(token);
+                // USE ONLY APPSETTINGS - NO DATABASE
+                var apiUser = _configuration["Jwt:User"];        // "fopp"
+                var apiPass = _configuration["Jwt:Password"];    // "!x!a0j4a"
+
+                if (string.IsNullOrEmpty(apiUser) || string.IsNullOrEmpty(apiPass))
+                {
+                    _logger.LogError("JWT credentials not configured in appsettings.json");
+                    return StatusCode(500, "Authentication configuration error");
+                }
+
+                if (apiUser == model.Username && apiPass == model.Password)
+                {
+                    string token = GenerateJwtToken(model.Username);
+                    _logger.LogInformation("JWT token generated successfully for user: {Username}", model.Username);
+                    return Ok(new
+                    {
+                        token = token,
+                        expires = DateTime.UtcNow.AddDays(1),
+                        message = "Authentication successful"
+                    });
+                }
+                else
+                {
+                    _logger.LogWarning("Invalid login attempt for username: {Username}", model.Username);
+                    return BadRequest("Invalid credentials.");
+                }
             }
-            else
-                return BadRequest("Invalid login attempt.");
-
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating JWT token");
+                return StatusCode(500, "Internal server error");
+            }
         }
 
         private string GenerateJwtToken(string username)
         {
             var claims = new[]
             {
-        new Claim(JwtRegisteredClaimNames.Sub, username),
-        new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-    };
+                new Claim(JwtRegisteredClaimNames.Sub, username),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new Claim(ClaimTypes.Name, username),
+                new Claim("username", username)
+            };
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-            // Generate a GUID for the kid
-            var kid = Guid.NewGuid().ToString();
-
-            // Create the JWT header with the kid
-            var header = new JwtHeader(creds)
-    {
-        { "kid", kid } // Set the key ID here
-    };
-
-            var payload = new JwtPayload(
-                issuer: null, // Set your issuer if applicable
-                audience: null, // Set your audience if applicable
+            var token = new JwtSecurityToken(
+                issuer: null,
+                audience: null,
                 claims: claims,
-                notBefore: null,
-                expires: DateTime.UtcNow.AddDays(1)
+                notBefore: DateTime.UtcNow,
+                expires: DateTime.UtcNow.AddDays(1),
+                signingCredentials: creds
             );
 
-            var token = new JwtSecurityToken(header, payload);
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
-
-
-        private string GetConfig(string key)
-        {
-            if (_context == null)
-            {
-                throw new InvalidOperationException("Util has not been initialized with a valid DbContext.");
-            }
-
-            // Retrieve the setting with the specified key
-            var setting = _context.Setting
-                .AsNoTracking()
-                .FirstOrDefault(s => s.ID == key);
-
-            return setting?.Value; // Return the value or null if not found
-        }
-
-
     }
 }

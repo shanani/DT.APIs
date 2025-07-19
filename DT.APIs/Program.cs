@@ -1,21 +1,16 @@
 using DT.APIs.Helpers;
-using DT.APIs.Models.DTOs;
 using DT.APIs.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
+
 using System.Text;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure services
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("HubDbConn")));
+// REMOVED: AppDbContext since we don't need it for email queue only
+// Email queue uses direct SQL connection via EmailQueueService
 
-
- 
 builder.Services.AddSingleton<IWebHostEnvironment>(builder.Environment);
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<IEmailQueueService, EmailQueueService>();
@@ -31,14 +26,14 @@ builder.Services.AddAuthentication(x =>
 })
 .AddJwtBearer(x =>
 {
-    x.RequireHttpsMetadata = true;
+    x.RequireHttpsMetadata = !builder.Environment.IsDevelopment(); // FIXED: Only require HTTPS in production
     x.SaveToken = true;
     x.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-        ValidateIssuer = false, // Set to true in production if you have an issuer
-        ValidateAudience = false, // Set to true in production if you have an audience
+        ValidateIssuer = false,
+        ValidateAudience = false,
     };
 
     // Add logging for token validation events
@@ -72,7 +67,7 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new() { Title = "PP HUB APIs", Version = "v1" });
+    c.SwaggerDoc("v1", new() { Title = "DT APIs", Version = "v2.1" });
 
     // Add security definition for JWT
     c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
@@ -108,7 +103,7 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/v1/swagger.json", "Hub API V1"); });
-    app.UseDeveloperExceptionPage(); // Show detailed errors in development
+    app.UseDeveloperExceptionPage();
 }
 else
 {
@@ -116,12 +111,7 @@ else
     app.UseSwaggerUI(c => { c.SwaggerEndpoint("/hub/swagger/v1/swagger.json", "Hub API V1"); });
 }
 
-// Uncomment for production
-// app.UseHttpsRedirection();
-
 app.UseAuthentication();
 app.UseAuthorization();
-
 app.MapControllers();
-
 app.Run();
