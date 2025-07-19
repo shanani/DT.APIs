@@ -1,5 +1,6 @@
 using DT.APIs.Helpers;
-using DT.APIs.Models;
+using DT.APIs.Models.DTOs;
+using DT.APIs.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -17,6 +18,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
  
 builder.Services.AddSingleton<IWebHostEnvironment>(builder.Environment);
 builder.Services.AddScoped<EmailService>();
+builder.Services.AddScoped<IEmailQueueService, EmailQueueService>();
 
 // Read the JWT key from appsettings.json
 var jwtKey = builder.Configuration.GetSection("Jwt:Key").Value;

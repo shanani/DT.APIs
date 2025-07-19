@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="Models\EmailModels.cs" />
+    <None Include="Models\DTOs\EmailModels.cs" />
   </ItemGroup>
 
   <ItemGroup>

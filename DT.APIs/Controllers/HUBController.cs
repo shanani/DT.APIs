@@ -1,5 +1,6 @@
 using DT.APIs.Helpers;
 using DT.APIs.Models;
+using DT.APIs.Models.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;

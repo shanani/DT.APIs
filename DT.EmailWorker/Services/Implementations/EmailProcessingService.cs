@@ -226,16 +226,8 @@ namespace DT.EmailWorker.Services.Implementations
                     }
                 }
 
-                // Send email via SMTP
-                var sendSuccess = await _smtpService.SendEmailAsync(
-                    request.ToEmails,
-                    request.Subject,
-                    request.Body,
-                    request.IsHtml,
-                    request.CcEmails,
-                    request.BccEmails,
-                    null, // attachments - will be handled separately
-                    cancellationToken);
+                // Send email via SMTP - FIXED: SendEmailAsync only takes EmailProcessingRequest
+                var sendSuccess = await _smtpService.SendEmailAsync(request);
 
                 result.IsSuccess = sendSuccess;
                 result.ErrorMessage = sendSuccess ? null : "SMTP send failed";
