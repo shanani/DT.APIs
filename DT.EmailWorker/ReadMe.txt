@@ -1,4 +1,93 @@
 ﻿
+
+
+
+###############################################################################################
+
+
+
+# deployment 
+
+
+
+dotnet ef migrations add InitialCreate
+
+dotnet ef database drop --force
+
+dotnet ef database update
+
+
+
+
+# publish
+
+
+dotnet publish -c Release -r win-x64 --self-contained true -o "./publish"
+
+
+
+
+
+
+# Set environment variable for production
+
+
+setx DOTNET_ENVIRONMENT "Production" /M
+
+
+
+
+
+# Install service
+
+sc create "STC.DT.EmailWorker" binPath="C:\PP\EmailService\DT.EmailWorker\DT.EmailWorker.exe" start=auto
+
+
+
+# Set description
+
+sc description "STC.DT.EmailWorker" "Enterprise Email Processing Service for Digital Transformation"
+
+
+
+# Set service to restart on failure
+
+sc failure "STC.DT.EmailWorker" reset=86400 actions=restart/5000/restart/5000/restart/5000
+
+# Start service
+sc start "STC.DT.EmailWorker"
+
+
+
+
+
+
+
+
+##################################################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 🚀 DT.EmailWorker - Enterprise Email Processing Service
 📋 Project Overview
 DT.EmailWorker is a standalone, enterprise-grade Windows Service designed to handle all email processing operations for the ED.LandingPage ecosystem and any other applications that need reliable email delivery. Built with .NET 8, it provides a robust, scalable, and configurable solution for high-volume email processing with comprehensive monitoring and management capabilities.

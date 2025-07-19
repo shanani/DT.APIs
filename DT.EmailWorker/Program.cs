@@ -38,7 +38,7 @@ using (var scope = host.Services.CreateScope())
         var context = scope.ServiceProvider.GetRequiredService<EmailDbContext>();
 
         // Create database if not exists
-        await context.Database.EnsureCreatedAsync();
+        await context.Database.MigrateAsync();
 
         // Seed default templates
         await DefaultTemplateSeeder.SeedAsync(context);

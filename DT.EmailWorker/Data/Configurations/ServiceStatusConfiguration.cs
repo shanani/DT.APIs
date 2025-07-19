@@ -93,6 +93,8 @@ namespace DT.EmailWorker.Data.Configurations
             builder.Property(e => e.LastError)
                 .HasColumnType("nvarchar(max)");
 
+            builder.Property(e => e.LastErrorAt);
+
             // Statistics
             builder.Property(e => e.TotalEmailsProcessed)
                 .IsRequired()
@@ -105,6 +107,17 @@ namespace DT.EmailWorker.Data.Configurations
             builder.Property(e => e.UptimeSeconds)
                 .IsRequired()
                 .HasDefaultValue(0L);
+
+            // IMPORTANT: Configure AdditionalInfo property for monitoring
+            // Store as JSON string in the database
+            builder.Property(e => e.AdditionalInfo)
+                .HasConversion(
+                    v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => string.IsNullOrEmpty(v) ? new Dictionary<string, object>() :
+                         System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new Dictionary<string, object>())
+                .HasColumnType("nvarchar(max)")
+                .HasColumnName("AdditionalInfoJson")
+                .IsRequired(false);
 
             // Unique constraint on service name and machine name
             builder.HasIndex(e => new { e.ServiceName, e.MachineName })
