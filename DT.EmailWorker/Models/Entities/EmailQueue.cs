@@ -138,9 +138,9 @@ namespace DT.EmailWorker.Models.Entities
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
-        /// When the email was last updated
+        /// When the email was last updated - FIXED: Made nullable
         /// </summary>
-        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? UpdatedAt { get; set; }
 
         /// <summary>
         /// Who created the email request
@@ -155,6 +155,11 @@ namespace DT.EmailWorker.Models.Entities
         [MaxLength(100)]
         public string? RequestSource { get; set; }
 
+        /// <summary>
+        /// When the email was sent - FIXED: Made nullable and public
+        /// </summary>
+        public DateTime? SentAt { get; set; }
+
         // Navigation Properties
         /// <summary>
         /// Template reference if using a template
@@ -165,6 +170,5 @@ namespace DT.EmailWorker.Models.Entities
         /// Processing logs for this email
         /// </summary>
         public virtual ICollection<ProcessingLog> ProcessingLogs { get; set; } = new List<ProcessingLog>();
-        public DateTime SentAt { get; internal set; }
     }
 }

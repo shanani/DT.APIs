@@ -29,88 +29,7 @@ namespace DT.EmailWorker.Services.Implementations
             _logger = logger;
         }
 
-        public async Task<EmailProcessingResult> ProcessEmailAsync(EmailProcessingRequest request, CancellationToken cancellationToken = default)
-        {
-            var stopwatch = Stopwatch.StartNew();
-            var result = new EmailProcessingResult();
-
-            try
-            {
-                _logger.LogDebug("Starting email processing for {QueueId}", request.QueueId);
-
-                // Validate email
-                var validation = await ValidateEmailAsync(request);
-                if (!validation.IsValid)
-                {
-                    result.IsSuccess = false;
-                    result.ErrorMessage = string.Join(", ", validation.Errors);
-                    result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
-                    return result;
-                }
-
-                // Process template if specified
-                if (request.RequiresTemplateProcessing && request.TemplateId.HasValue)
-                {
-                    var templateResult = await ProcessTemplateAsync(request, cancellationToken);
-                    if (!templateResult.IsSuccess)
-                    {
-                        result.IsSuccess = false;
-                        result.ErrorMessage = templateResult.ErrorMessage;
-                        result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
-                        return result;
-                    }
-                }
-
-                // Process attachments if any
-                if (!string.IsNullOrWhiteSpace(request.Attachments))
-                {
-                    var attachmentResult = await ProcessAttachmentsAsync(request.Attachments);
-                    if (!attachmentResult.IsSuccess)
-                    {
-                        result.IsSuccess = false;
-                        result.ErrorMessage = attachmentResult.ErrorMessage;
-                        result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
-                        return result;
-                    }
-                }
-
-                // Send email via SMTP - FIXED: Handle the bool return type
-                var sendSuccess = await _smtpService.SendEmailAsync(request);
-
-                stopwatch.Stop();
-
-                result.IsSuccess = sendSuccess;
-                result.ErrorMessage = sendSuccess ? null : "SMTP send failed";
-                result.MessageId = sendSuccess ? Guid.NewGuid().ToString() : null; // Generate a message ID if successful
-                result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
-
-                if (result.IsSuccess)
-                {
-                    _logger.LogInformation("Email {QueueId} processed successfully in {ProcessingTime}ms",
-                        request.QueueId, result.ProcessingTimeMs);
-                }
-                else
-                {
-                    _logger.LogWarning("Email {QueueId} processing failed: {Error}",
-                        request.QueueId, result.ErrorMessage);
-                }
-
-                return result;
-            }
-            catch (Exception ex)
-            {
-                stopwatch.Stop();
-
-                _logger.LogError(ex, "Error processing email {QueueId}", request.QueueId);
-
-                result.IsSuccess = false;
-                result.ErrorMessage = ex.Message;
-                result.Exception = ex;
-                result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
-
-                return result;
-            }
-        }
+         
 
         public async Task<EmailProcessingResult> ProcessTemplateEmailAsync(TemplateEmailRequest request, CancellationToken cancellationToken = default)
         {
@@ -259,6 +178,98 @@ namespace DT.EmailWorker.Services.Implementations
             }
         }
 
+        public async Task<EmailProcessingResult> ProcessEmailAsync(EmailProcessingRequest request, CancellationToken cancellationToken = default)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            var result = new EmailProcessingResult();
+
+            try
+            {
+                _logger.LogDebug("Starting email processing for {QueueId}", request.QueueId);
+
+                // 🔥 CRITICAL FIX: Process template BEFORE validation if template processing is required
+                if (request.RequiresTemplateProcessing && request.TemplateId.HasValue)
+                {
+                    var templateResult = await ProcessTemplateAsync(request, cancellationToken);
+                    if (!templateResult.IsSuccess)
+                    {
+                        result.IsSuccess = false;
+                        result.ErrorMessage = templateResult.ErrorMessage;
+                        result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
+                        return result;
+                    }
+
+                    _logger.LogDebug("Template processed successfully for {QueueId}. Body length: {BodyLength}",
+                        request.QueueId, request.Body?.Length ?? 0);
+                }
+
+                // ✅ NOW validate email AFTER template processing (so Body will be populated)
+                var validation = await ValidateEmailAsync(request);
+                if (!validation.IsValid)
+                {
+                    result.IsSuccess = false;
+                    result.ErrorMessage = string.Join(", ", validation.Errors);
+                    result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
+                    return result;
+                }
+
+                // Process attachments if any
+                if (!string.IsNullOrWhiteSpace(request.Attachments))
+                {
+                    var attachmentResult = await ProcessAttachmentsAsync(request.Attachments);
+                    if (!attachmentResult.IsSuccess)
+                    {
+                        result.IsSuccess = false;
+                        result.ErrorMessage = $"Attachment processing failed: {attachmentResult.ErrorMessage}";
+                        result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
+                        return result;
+                    }
+                }
+
+                // Send email via SMTP
+                var sendSuccess = await _smtpService.SendEmailAsync(
+                    request.ToEmails,
+                    request.Subject,
+                    request.Body,
+                    request.IsHtml,
+                    request.CcEmails,
+                    request.BccEmails,
+                    null, // attachments - will be handled separately
+                    cancellationToken);
+
+                result.IsSuccess = sendSuccess;
+                result.ErrorMessage = sendSuccess ? null : "SMTP send failed";
+                result.MessageId = sendSuccess ? Guid.NewGuid().ToString() : null;
+                result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
+
+                if (result.IsSuccess)
+                {
+                    _logger.LogInformation("Email {QueueId} processed successfully in {ProcessingTime}ms",
+                        request.QueueId, result.ProcessingTimeMs);
+                }
+                else
+                {
+                    _logger.LogWarning("Email {QueueId} processing failed: {Error}",
+                        request.QueueId, result.ErrorMessage);
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                stopwatch.Stop();
+
+                _logger.LogError(ex, "Error processing email {QueueId}", request.QueueId);
+
+                result.IsSuccess = false;
+                result.ErrorMessage = ex.Message;
+                result.Exception = ex;
+                result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
+
+                return result;
+            }
+        }
+
         private async Task<EmailProcessingResult> ProcessTemplateAsync(EmailProcessingRequest request, CancellationToken cancellationToken)
         {
             try
@@ -276,6 +287,9 @@ namespace DT.EmailWorker.Services.Implementations
                     {
                         templateData = JsonSerializer.Deserialize<Dictionary<string, string>>(request.TemplateData)
                                      ?? new Dictionary<string, string>();
+
+                        _logger.LogDebug("Template data parsed for {QueueId}: {DataCount} items",
+                            request.QueueId, templateData.Count);
                     }
                     catch (JsonException ex)
                     {
@@ -292,9 +306,17 @@ namespace DT.EmailWorker.Services.Implementations
 
                 if (result.IsSuccess)
                 {
-                    // Update the request with processed content
+                    // 🔥 CRITICAL FIX: Update the request with processed content
                     request.Subject = result.ProcessedSubject;
                     request.Body = result.ProcessedBody;
+
+                    _logger.LogDebug("Template processing successful for {QueueId}. Subject: '{Subject}', Body length: {BodyLength}",
+                        request.QueueId, request.Subject, request.Body?.Length ?? 0);
+                }
+                else
+                {
+                    _logger.LogError("Template processing failed for {QueueId}: {Error}",
+                        request.QueueId, result.ErrorMessage);
                 }
 
                 return new EmailProcessingResult

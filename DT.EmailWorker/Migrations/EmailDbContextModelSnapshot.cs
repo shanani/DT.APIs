@@ -279,7 +279,7 @@ namespace DT.EmailWorker.Migrations
                     b.Property<DateTime?>("ScheduledFor")
                         .HasColumnType("datetime2");
 
-                    b.Property<DateTime>("SentAt")
+                    b.Property<DateTime?>("SentAt")
                         .HasColumnType("datetime2");
 
                     b.Property<byte>("Status")
@@ -303,18 +303,14 @@ namespace DT.EmailWorker.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
 
-                    b.Property<DateTime>("UpdatedAt")
+                    b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProcessingStartedAt")
-                        .HasDatabaseName("IX_EmailQueue_ProcessingStartedAt")
-                        .HasFilter("[ProcessingStartedAt] IS NOT NULL");
-
                     b.HasIndex("QueueId")
                         .IsUnique()
-                        .HasDatabaseName("IX_EmailQueue_QueueId_Unique");
+                        .HasDatabaseName("IX_EmailQueue_QueueId");
 
                     b.HasIndex("RetryCount")
                         .HasDatabaseName("IX_EmailQueue_RetryCount")
@@ -326,13 +322,8 @@ namespace DT.EmailWorker.Migrations
 
                     b.HasIndex("TemplateId");
 
-                    b.HasIndex("CreatedAt", "Status")
-                        .HasDatabaseName("IX_EmailQueue_CreatedAt_Status");
-
                     b.HasIndex("Status", "Priority", "CreatedAt")
                         .HasDatabaseName("IX_EmailQueue_Status_Priority_CreatedAt");
-
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("Status", "Priority", "CreatedAt"), new[] { "QueueId", "ToEmails", "Subject" });
 
                     b.ToTable("EmailQueue", (string)null);
                 });

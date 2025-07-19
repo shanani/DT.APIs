@@ -85,7 +85,20 @@ namespace DT.EmailWorker.Data.Configurations
             builder.Property(e => e.ProcessedBy)
                 .HasMaxLength(100);
 
+            // FIXED: Processing DateTime fields - all nullable
+            builder.Property(e => e.ProcessingStartedAt)
+                .IsRequired(false);
+
+            builder.Property(e => e.ProcessedAt)
+                .IsRequired(false);
+
+            builder.Property(e => e.SentAt)
+                .IsRequired(false);
+
             // Scheduling Properties
+            builder.Property(e => e.ScheduledFor)
+                .IsRequired(false);
+
             builder.Property(e => e.IsScheduled)
                 .IsRequired()
                 .HasDefaultValue(false);
@@ -102,10 +115,17 @@ namespace DT.EmailWorker.Data.Configurations
             builder.Property(e => e.RequestSource)
                 .HasMaxLength(100);
 
-            // Indexes for performance optimization
+            // FIXED: UpdatedAt should be nullable and not have default value in some cases
+            builder.Property(e => e.UpdatedAt)
+                .IsRequired(false);
+
+            // Indexes
+            builder.HasIndex(e => e.QueueId)
+                .IsUnique()
+                .HasDatabaseName("IX_EmailQueue_QueueId");
+
             builder.HasIndex(e => new { e.Status, e.Priority, e.CreatedAt })
-                .HasDatabaseName("IX_EmailQueue_Status_Priority_CreatedAt")
-                .IncludeProperties(e => new { e.QueueId, e.ToEmails, e.Subject });
+                .HasDatabaseName("IX_EmailQueue_Status_Priority_CreatedAt");
 
             builder.HasIndex(e => e.ScheduledFor)
                 .HasDatabaseName("IX_EmailQueue_ScheduledFor")
@@ -115,28 +135,11 @@ namespace DT.EmailWorker.Data.Configurations
                 .HasDatabaseName("IX_EmailQueue_RetryCount")
                 .HasFilter("[Status] = 3"); // Failed status
 
-            builder.HasIndex(e => e.QueueId)
-                .IsUnique()
-                .HasDatabaseName("IX_EmailQueue_QueueId_Unique");
-
-            builder.HasIndex(e => e.ProcessingStartedAt)
-                .HasDatabaseName("IX_EmailQueue_ProcessingStartedAt")
-                .HasFilter("[ProcessingStartedAt] IS NOT NULL");
-
-            builder.HasIndex(e => new { e.CreatedAt, e.Status })
-                .HasDatabaseName("IX_EmailQueue_CreatedAt_Status");
-
-            // Foreign Key Relationships
+            // Navigation Properties
             builder.HasOne(e => e.Template)
                 .WithMany(t => t.EmailQueues)
                 .HasForeignKey(e => e.TemplateId)
                 .OnDelete(DeleteBehavior.SetNull);
-
-            builder.HasMany(e => e.ProcessingLogs)
-                .WithOne(p => p.EmailQueue)
-                .HasForeignKey(p => p.QueueId)
-                .HasPrincipalKey(e => e.QueueId)
-                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 }

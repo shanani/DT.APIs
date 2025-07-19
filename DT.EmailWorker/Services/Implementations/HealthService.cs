@@ -1,15 +1,17 @@
+﻿using DT.EmailWorker.Core.Configuration;
 using DT.EmailWorker.Data;
 using DT.EmailWorker.Models.DTOs;
 using DT.EmailWorker.Models.Entities;
 using DT.EmailWorker.Models.Enums;
 using DT.EmailWorker.Services.Interfaces;
+using MailKit.Net.Smtp;
+using MailKit.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Reflection;
-using MailKit.Net.Smtp;
-using MailKit.Security;
 
 namespace DT.EmailWorker.Services.Implementations
 {
@@ -23,22 +25,24 @@ namespace DT.EmailWorker.Services.Implementations
         private readonly IConfiguration _configuration;
         private readonly string _serviceName;
         private readonly string _serviceVersion;
+        private readonly ProcessingSettings _processingSettings;
 
         public HealthService(
             EmailDbContext context,
             ILogger<HealthService> logger,
+            IOptions<ProcessingSettings> processingSettings,
             IConfiguration configuration)
         {
             _context = context;
             _logger = logger;
             _configuration = configuration;
+            _processingSettings = processingSettings.Value;    // ← ADD THIS LINE
             _serviceName = "DT.EmailWorker";
             _serviceVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
         }
 
 
-
-
+        // UPDATE UpdateServiceStatusAsync METHOD TO INCLUDE:
         public async Task UpdateServiceStatusAsync(ServiceHealthStatus status, Dictionary<string, object>? additionalInfo = null)
         {
             try
@@ -54,7 +58,10 @@ namespace DT.EmailWorker.Services.Implementations
                         ServiceName = _serviceName,
                         MachineName = machineName,
                         ServiceVersion = _serviceVersion,
-                        StartedAt = DateTime.UtcNow
+                        StartedAt = DateTime.UtcNow,
+                        // ← ADD THESE LINES:
+                        MaxConcurrentWorkers = _processingSettings.MaxConcurrentWorkers,
+                        BatchSize = _processingSettings.BatchSize
                     };
                     _context.ServiceStatus.Add(serviceStatus);
                 }
@@ -63,14 +70,17 @@ namespace DT.EmailWorker.Services.Implementations
                 serviceStatus.LastHeartbeat = DateTime.UtcNow;
                 serviceStatus.UpdatedAt = DateTime.UtcNow;
 
+                // ← ADD THESE LINES TO UPDATE CONFIG VALUES:
+                serviceStatus.MaxConcurrentWorkers = _processingSettings.MaxConcurrentWorkers;
+                serviceStatus.BatchSize = _processingSettings.BatchSize;
+
                 // Update performance metrics
                 var metrics = await GetResourceUsageAsync();
                 serviceStatus.CpuUsagePercent = metrics.CpuUsagePercent;
                 serviceStatus.MemoryUsageMB = metrics.MemoryUsageMB;
                 serviceStatus.DiskUsagePercent = metrics.DiskUsagePercent;
 
-                // Store additional info as JSON string in LastError field if needed
-                // Note: Entity doesn't have AdditionalInfo property, consider adding it or use LastError for now
+                // Store additional info as JSON
                 if (additionalInfo != null && additionalInfo.ContainsKey("error"))
                 {
                     serviceStatus.LastError = additionalInfo["error"]?.ToString();
@@ -84,6 +94,8 @@ namespace DT.EmailWorker.Services.Implementations
                 throw;
             }
         }
+
+
 
         /// <summary>
         /// Get service health information (alias for GetServiceStatusAsync for backward compatibility)

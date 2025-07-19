@@ -1,4 +1,4 @@
-using DT.EmailWorker.Core.Configuration;
+﻿using DT.EmailWorker.Core.Configuration;
 using DT.EmailWorker.Core.Utilities;
 using DT.EmailWorker.Models.Enums;
 using DT.EmailWorker.Services.Interfaces;
@@ -33,6 +33,134 @@ namespace DT.EmailWorker.Workers
             _semaphore = new SemaphoreSlim(_processingSettings.MaxConcurrentWorkers, _processingSettings.MaxConcurrentWorkers);
         }
 
+        // CRITICAL FIX: Each email processing gets its own scope to prevent DbContext conflicts
+
+        private async Task ProcessSingleEmailAsync(
+            Models.DTOs.EmailProcessingRequest emailRequest,
+            CancellationToken cancellationToken)
+        {
+            // 🔥 CRITICAL FIX: Create separate scope for EACH email to prevent DbContext conflicts
+            using var scope = _serviceProvider.CreateScope();
+            var emailQueueService = scope.ServiceProvider.GetRequiredService<IEmailQueueService>();
+            var emailProcessingService = scope.ServiceProvider.GetRequiredService<IEmailProcessingService>();
+
+            var stopwatch = Stopwatch.StartNew();
+
+            try
+            {
+                var emailId = (int)(emailRequest.QueueId.GetHashCode() & 0x7FFFFFFF);
+                LoggingHelper.LogEmailProcessingStart(_logger, emailId, emailRequest.ToEmails, emailRequest.Subject);
+
+                var workerId = Environment.MachineName + "-" + Thread.CurrentThread.ManagedThreadId;
+                await emailQueueService.MarkAsProcessingAsync(emailRequest.QueueId, workerId);
+
+                // Process the email
+                var result = await emailProcessingService.ProcessEmailAsync(emailRequest, cancellationToken);
+
+                stopwatch.Stop();
+
+                if (result.IsSuccess)
+                {
+                    await emailQueueService.MarkAsSentAsync(emailRequest.QueueId, workerId, null);
+                    LoggingHelper.LogEmailProcessingSuccess(_logger, emailId, emailRequest.ToEmails, stopwatch.ElapsedMilliseconds);
+                }
+                else
+                {
+                    await HandleEmailProcessingFailure(emailRequest, result.ErrorMessage, emailQueueService, cancellationToken);
+                    LoggingHelper.LogEmailProcessingFailure(_logger, emailId, emailRequest.ToEmails,
+                        new Exception(result.ErrorMessage ?? "Unknown error"), 0);
+                }
+            }
+            catch (Exception ex)
+            {
+                stopwatch.Stop();
+                var emailId = (int)(emailRequest.QueueId.GetHashCode() & 0x7FFFFFFF);
+                LoggingHelper.LogEmailProcessingFailure(_logger, emailId, emailRequest.ToEmails, ex, 0);
+                await HandleEmailProcessingFailure(emailRequest, ex.Message, emailQueueService, cancellationToken);
+            }
+        }
+
+        private async Task ProcessEmailBatchAsync(CancellationToken cancellationToken)
+        {
+            // 🔥 CRITICAL FIX: Only use scope for fetching emails, not for processing them
+            using var fetchScope = _serviceProvider.CreateScope();
+            var emailQueueService = fetchScope.ServiceProvider.GetRequiredService<IEmailQueueService>();
+
+            try
+            {
+                var workerId = Environment.MachineName + "-" + Thread.CurrentThread.ManagedThreadId;
+                var pendingEmails = await emailQueueService.GetPendingEmailsAsync(_processingSettings.BatchSize, workerId);
+
+                if (!pendingEmails.Any())
+                {
+                    _logger.LogDebug("No pending emails found");
+                    return;
+                }
+
+                var batchStopwatch = Stopwatch.StartNew();
+                LoggingHelper.LogBatchProcessingStart(_logger, pendingEmails.Count, "Normal");
+
+                // 🔥 CRITICAL FIX: Each task gets its own scope via ProcessSingleEmailAsync
+                var processingTasks = pendingEmails.Select(async emailRequest =>
+                {
+                    await _semaphore.WaitAsync(cancellationToken);
+                    try
+                    {
+                        Interlocked.Increment(ref _processingCount);
+                        // ✅ This now creates its own scope internally - FIXED: Only 2 parameters needed
+                        await ProcessSingleEmailAsync(emailRequest, cancellationToken);
+                    }
+                    finally
+                    {
+                        _semaphore.Release();
+                        Interlocked.Decrement(ref _processingCount);
+                    }
+                });
+
+                await Task.WhenAll(processingTasks);
+
+                batchStopwatch.Stop();
+                _lastProcessingTime = DateTime.UtcNow;
+
+                LoggingHelper.LogBatchProcessingComplete(_logger, pendingEmails.Count, pendingEmails.Count, 0, batchStopwatch.ElapsedMilliseconds);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing email batch");
+            }
+        }
+
+        private async Task HandleEmailProcessingFailure(
+            Models.DTOs.EmailProcessingRequest emailRequest,
+            string? errorMessage,
+            IEmailQueueService emailQueueService,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                await emailQueueService.MarkAsFailedAsync(emailRequest.QueueId, errorMessage ?? "Unknown error", true);
+                _logger.LogWarning("Email {QueueId} failed: {ErrorMessage}", emailRequest.QueueId, errorMessage);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error handling email processing failure for {QueueId}", emailRequest.QueueId);
+            }
+        }
+
+        // Overload method for when we already have the services scoped
+        private async Task HandleEmailProcessingFailure(
+            Models.DTOs.EmailProcessingRequest emailRequest,
+            string? errorMessage,
+            CancellationToken cancellationToken)
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var emailQueueService = scope.ServiceProvider.GetRequiredService<IEmailQueueService>();
+
+            await HandleEmailProcessingFailure(emailRequest, errorMessage, emailQueueService, cancellationToken);
+        }
+
+
+      
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             // FIX: Use simple logging instead of missing LogWorkerStart method
@@ -55,124 +183,8 @@ namespace DT.EmailWorker.Workers
 
             _logger.LogInformation("Email Processing Worker stopped");
         }
+         
 
-        private async Task ProcessEmailBatchAsync(CancellationToken cancellationToken)
-        {
-            using var scope = _serviceProvider.CreateScope();
-            var emailQueueService = scope.ServiceProvider.GetRequiredService<IEmailQueueService>();
-            var emailProcessingService = scope.ServiceProvider.GetRequiredService<IEmailProcessingService>();
-
-            try
-            {
-                // FIX: Use correct method signature and pass workerId
-                var workerId = Environment.MachineName + "-" + Thread.CurrentThread.ManagedThreadId;
-                var pendingEmails = await emailQueueService.GetPendingEmailsAsync(_processingSettings.BatchSize, workerId);
-
-                if (!pendingEmails.Any())
-                {
-                    _logger.LogDebug("No pending emails found");
-                    return;
-                }
-
-                var batchStopwatch = Stopwatch.StartNew();
-
-                // FIX: Use LogBatchProcessingStart with correct signature
-                LoggingHelper.LogBatchProcessingStart(_logger, pendingEmails.Count, "Normal");
-
-                var processingTasks = pendingEmails.Select(async emailRequest =>
-                {
-                    await _semaphore.WaitAsync(cancellationToken);
-                    try
-                    {
-                        Interlocked.Increment(ref _processingCount);
-                        await ProcessSingleEmailAsync(emailRequest, emailQueueService, emailProcessingService, cancellationToken);
-                    }
-                    finally
-                    {
-                        _semaphore.Release();
-                        Interlocked.Decrement(ref _processingCount);
-                    }
-                });
-
-                Interlocked.Add(ref _processingCount, pendingEmails.Count);
-                await Task.WhenAll(processingTasks);
-
-                batchStopwatch.Stop();
-                _lastProcessingTime = DateTime.UtcNow;
-
-                // FIX: Use correct LogBatchProcessingComplete signature
-                LoggingHelper.LogBatchProcessingComplete(_logger, pendingEmails.Count, pendingEmails.Count, 0, batchStopwatch.ElapsedMilliseconds);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error processing email batch");
-            }
-        }
-
-        private async Task ProcessSingleEmailAsync(
-            Models.DTOs.EmailProcessingRequest emailRequest,
-            IEmailQueueService emailQueueService,
-            IEmailProcessingService emailProcessingService,
-            CancellationToken cancellationToken)
-        {
-            var stopwatch = Stopwatch.StartNew();
-
-            try
-            {
-                // FIX: Use QueueId instead of Id, and cast to int for logging
-                var emailId = (int)(emailRequest.QueueId.GetHashCode() & 0x7FFFFFFF); // Convert Guid to int for logging
-                LoggingHelper.LogEmailProcessingStart(_logger, emailId, emailRequest.ToEmails, emailRequest.Subject);
-
-                // FIX: Use MarkAsProcessingAsync with correct parameters
-                var workerId = Environment.MachineName + "-" + Thread.CurrentThread.ManagedThreadId;
-                await emailQueueService.MarkAsProcessingAsync(emailRequest.QueueId, workerId);
-
-                // Process the email
-                var result = await emailProcessingService.ProcessEmailAsync(emailRequest, cancellationToken);
-
-                stopwatch.Stop();
-
-                if (result.IsSuccess)
-                {
-                    // FIX: Use MarkAsSentAsync with correct parameters
-                    await emailQueueService.MarkAsSentAsync(emailRequest.QueueId, workerId, (int?)stopwatch.ElapsedMilliseconds);
-                    LoggingHelper.LogEmailProcessingSuccess(_logger, emailId, emailRequest.ToEmails, stopwatch.ElapsedMilliseconds);
-                }
-                else
-                {
-                    // Handle failure
-                    await HandleEmailProcessingFailure(emailRequest, result.ErrorMessage, emailQueueService, cancellationToken);
-                    LoggingHelper.LogEmailProcessingFailure(_logger, emailId, emailRequest.ToEmails,
-                        new Exception(result.ErrorMessage), 0); // RetryCount not available in EmailProcessingRequest
-                }
-            }
-            catch (Exception ex)
-            {
-                stopwatch.Stop();
-                await HandleEmailProcessingFailure(emailRequest, ex.Message, emailQueueService, cancellationToken);
-                var emailId = (int)(emailRequest.QueueId.GetHashCode() & 0x7FFFFFFF);
-                LoggingHelper.LogEmailProcessingFailure(_logger, emailId, emailRequest.ToEmails, ex, 0);
-            }
-        }
-
-        private async Task HandleEmailProcessingFailure(
-            Models.DTOs.EmailProcessingRequest emailRequest,
-            string? errorMessage,
-            IEmailQueueService emailQueueService,
-            CancellationToken cancellationToken)
-        {
-            try
-            {
-                // FIX: Use MarkAsFailedAsync which handles retry logic internally
-                await emailQueueService.MarkAsFailedAsync(emailRequest.QueueId, errorMessage ?? "Unknown error", true);
-
-                _logger.LogWarning("Email {QueueId} failed: {ErrorMessage}", emailRequest.QueueId, errorMessage);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error handling email processing failure for {QueueId}", emailRequest.QueueId);
-            }
-        }
 
         /// <summary>
         /// Process retry emails
@@ -209,7 +221,6 @@ namespace DT.EmailWorker.Workers
         {
             using var scope = _serviceProvider.CreateScope();
             var emailQueueService = scope.ServiceProvider.GetRequiredService<IEmailQueueService>();
-            var emailProcessingService = scope.ServiceProvider.GetRequiredService<IEmailProcessingService>();
 
             try
             {
@@ -225,7 +236,9 @@ namespace DT.EmailWorker.Workers
 
                 // Convert EmailQueue entity to EmailProcessingRequest
                 var emailRequest = ConvertToProcessingRequest(email);
-                await ProcessSingleEmailAsync(emailRequest, emailQueueService, emailProcessingService, cancellationToken);
+
+                // 🔥 FIX: Use the new ProcessSingleEmailAsync that creates its own scope
+                await ProcessSingleEmailAsync(emailRequest, cancellationToken);
                 return true;
             }
             catch (Exception ex)
@@ -253,15 +266,14 @@ namespace DT.EmailWorker.Workers
                 TemplateId = emailQueue.TemplateId,
                 TemplateData = emailQueue.TemplateData,
                 RequiresTemplateProcessing = emailQueue.RequiresTemplateProcessing,
-                Attachments = emailQueue.Attachments, // This is already a JSON string
+                Attachments = emailQueue.Attachments,
                 HasEmbeddedImages = emailQueue.HasEmbeddedImages,
                 ScheduledFor = emailQueue.ScheduledFor,
-                IsScheduled = emailQueue.IsScheduled,
-                CreatedBy = emailQueue.CreatedBy,
-                RequestSource = emailQueue.RequestSource,
-                CorrelationId = Guid.NewGuid() // Generate new correlation ID for tracking
+                IsScheduled = emailQueue.IsScheduled
             };
         }
+
+       
 
         /// <summary>
         /// Pause email processing

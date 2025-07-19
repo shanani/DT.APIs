@@ -20,7 +20,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             _context = context;
             _logger = logger;
-            _placeholderRegex = new Regex(@"\{([^}]+)\}", RegexOptions.Compiled);
+            _placeholderRegex = new Regex(@"\{\{([^}]+)\}\}", RegexOptions.Compiled);
         }
 
         public async Task<EmailTemplate?> GetTemplateByIdAsync(int templateId, CancellationToken cancellationToken = default)
