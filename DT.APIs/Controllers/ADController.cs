@@ -27,8 +27,7 @@ namespace DT.APIs.Controllers
 
         public ADController(ILogger<ADController> logger, IConfiguration configuration, EmailService emailService)
         {
-            _logger = logger;
-            _connectionString = configuration.GetConnectionString("HubDbConn")!;
+            _logger = logger;           
             _configuration = configuration;
             _emailService = emailService;
 
