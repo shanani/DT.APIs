@@ -151,8 +151,8 @@ namespace DT.EmailWorker.Services.Implementations
                     throw new ArgumentException($"Template with name '{template.Name}' already exists");
                 }
 
-                template.CreatedAt = DateTime.UtcNow;
-                template.UpdatedAt = DateTime.UtcNow;
+                template.CreatedAt = DateTime.UtcNow.AddHours(3);
+                template.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                 _context.EmailTemplates.Add(template);
                 await _context.SaveChangesAsync(cancellationToken);
@@ -204,7 +204,7 @@ namespace DT.EmailWorker.Services.Implementations
                 existingTemplate.SubjectTemplate = template.SubjectTemplate;
                 existingTemplate.BodyTemplate = template.BodyTemplate;
                 existingTemplate.IsActive = template.IsActive;                
-                existingTemplate.UpdatedAt = DateTime.UtcNow;
+                existingTemplate.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                 await _context.SaveChangesAsync(cancellationToken);
 
@@ -409,7 +409,7 @@ namespace DT.EmailWorker.Services.Implementations
                 {
                     // Instead of deleting, mark as inactive
                     template.IsActive = false;
-                    template.UpdatedAt = DateTime.UtcNow;
+                    template.UpdatedAt = DateTime.UtcNow.AddHours(3);
                 }
                 else
                 {

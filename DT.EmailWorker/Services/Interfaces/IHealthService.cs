@@ -140,7 +140,7 @@ namespace DT.EmailWorker.Services.Interfaces
         public ServiceHealthStatus OverallStatus { get; set; }
         public List<HealthCheckResult> ComponentResults { get; set; } = new List<HealthCheckResult>();
         public TimeSpan TotalCheckTime { get; set; }
-        public DateTime CheckedAt { get; set; } = DateTime.UtcNow;
+        public DateTime CheckedAt { get; set; } = DateTime.UtcNow.AddHours(3);
         public string Summary { get; set; } = string.Empty;
     }
 

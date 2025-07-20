@@ -18,7 +18,7 @@ namespace DT.EmailWorker.Workers
         private readonly ILogger<EmailProcessingWorker> _logger;
         private readonly SemaphoreSlim _semaphore;
         private int _processingCount = 0;
-        private DateTime _lastProcessingTime = DateTime.UtcNow;
+        private DateTime _lastProcessingTime = DateTime.UtcNow.AddHours(3);
 
         public EmailProcessingWorker(
             IServiceProvider serviceProvider,
@@ -120,7 +120,7 @@ namespace DT.EmailWorker.Workers
                 await Task.WhenAll(processingTasks);
 
                 batchStopwatch.Stop();
-                _lastProcessingTime = DateTime.UtcNow;
+                _lastProcessingTime = DateTime.UtcNow.AddHours(3);
 
                 LoggingHelper.LogBatchProcessingComplete(_logger, pendingEmails.Count, pendingEmails.Count, 0, batchStopwatch.ElapsedMilliseconds);
             }

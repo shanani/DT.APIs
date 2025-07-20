@@ -81,8 +81,8 @@ namespace DT.EmailWorker.Data.Seeders
 </body>
 </html>",
     IsActive = true,
-    CreatedAt = DateTime.UtcNow,
-    UpdatedAt = DateTime.UtcNow,
+    CreatedAt = DateTime.UtcNow.AddHours(3),
+    UpdatedAt = DateTime.UtcNow.AddHours(3),
     CreatedBy = "SYSTEM_SEEDER",
     UpdatedBy = "SYSTEM_SEEDER"
 },
@@ -131,8 +131,8 @@ namespace DT.EmailWorker.Data.Seeders
 </html>",
                     Description = "Welcome email template for new user registration",
                     IsActive = true,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow.AddHours(3),
+                    UpdatedAt = DateTime.UtcNow.AddHours(3)
                 },
 
                 // Password Reset Template
@@ -179,8 +179,8 @@ namespace DT.EmailWorker.Data.Seeders
 </html>",
                     Description = "Password reset email template",
                     IsActive = true,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow.AddHours(3),
+                    UpdatedAt = DateTime.UtcNow.AddHours(3)
                 },
 
                 // Order Confirmation Template
@@ -243,8 +243,8 @@ namespace DT.EmailWorker.Data.Seeders
 </html>",
                     Description = "Order confirmation email template",
                     IsActive = true,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow.AddHours(3),
+                    UpdatedAt = DateTime.UtcNow.AddHours(3)
                 },
 
                 // System Notification Template
@@ -288,8 +288,8 @@ namespace DT.EmailWorker.Data.Seeders
 </html>",
                     Description = "Generic system notification email template",
                     IsActive = true,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow.AddHours(3),
+                    UpdatedAt = DateTime.UtcNow.AddHours(3)
                 }
             };
 

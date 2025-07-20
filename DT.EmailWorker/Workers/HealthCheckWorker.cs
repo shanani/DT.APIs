@@ -222,7 +222,7 @@ namespace DT.EmailWorker.Workers
 
                 // Check for processing slowdown - calculate processing rate from available data
                 // FIXED: Calculate processing rate since it's not available as a property
-                var timeSinceLastUpdate = DateTime.UtcNow - queueStats.LastUpdated;
+                var timeSinceLastUpdate = DateTime.UtcNow.AddHours(3) - queueStats.LastUpdated;
                 var processingRate = timeSinceLastUpdate.TotalHours > 0
                     ? queueStats.ProcessingCount / timeSinceLastUpdate.TotalHours
                     : 0;

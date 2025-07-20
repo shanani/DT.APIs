@@ -102,7 +102,7 @@ namespace DT.EmailWorker.Monitoring.Alerts
                 Title = title,
                 Message = message,
                 Level = level,
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTime.UtcNow.AddHours(3),
                 Source = "Manual"
             };
 
@@ -134,7 +134,7 @@ namespace DT.EmailWorker.Monitoring.Alerts
             if (_alertRules.TryGetValue(ruleId, out var rule))
             {
                 rule.IsEnabled = enabled;
-                rule.UpdatedAt = DateTime.UtcNow;
+                rule.UpdatedAt = DateTime.UtcNow.AddHours(3);
                 _logger.LogInformation("Alert rule {RuleId} {Action}", ruleId, enabled ? "enabled" : "disabled");
                 return true;
             }
@@ -326,7 +326,7 @@ namespace DT.EmailWorker.Monitoring.Alerts
         private void UpdateAlertState(string ruleId, bool shouldTrigger, AlertRule rule)
         {
             var state = _alertStates.GetOrAdd(ruleId, _ => new AlertState { RuleId = ruleId });
-            var now = DateTime.UtcNow;
+            var now = DateTime.UtcNow.AddHours(3);
 
             state.LastEvaluated = now;
 
@@ -448,8 +448,8 @@ namespace DT.EmailWorker.Monitoring.Alerts
         public int EvaluationPeriodMinutes { get; set; } = 5;
         public int CooldownMinutes { get; set; } = 15;
         public bool IsEnabled { get; set; } = true;
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
+        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
     }
 
     public class AlertState
@@ -460,7 +460,7 @@ namespace DT.EmailWorker.Monitoring.Alerts
         public DateTime? TriggeredAt { get; set; }
         public DateTime? ResolvedAt { get; set; }
         public DateTime? LastTriggered { get; set; }
-        public DateTime LastEvaluated { get; set; } = DateTime.UtcNow;
+        public DateTime LastEvaluated { get; set; } = DateTime.UtcNow.AddHours(3);
         public int TriggerCount { get; set; }
         public string LastMessage { get; set; } = string.Empty;
     }
@@ -474,7 +474,7 @@ namespace DT.EmailWorker.Monitoring.Alerts
         public DateTime? TriggeredAt { get; set; }
         public DateTime LastEvaluated { get; set; }
         public int TriggerCount { get; set; }
-        public TimeSpan? Duration => TriggeredAt.HasValue ? DateTime.UtcNow - TriggeredAt.Value : null;
+        public TimeSpan? Duration => TriggeredAt.HasValue ? DateTime.UtcNow.AddHours(3) - TriggeredAt.Value : null;
     }
 
     public class Alert

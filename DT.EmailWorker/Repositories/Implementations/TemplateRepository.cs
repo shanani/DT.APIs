@@ -68,8 +68,8 @@ namespace DT.EmailWorker.Repositories.Implementations
         {
             try
             {
-                template.CreatedAt = DateTime.UtcNow;
-                template.UpdatedAt = DateTime.UtcNow;
+                template.CreatedAt = DateTime.UtcNow.AddHours(3);
+                template.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                 _context.EmailTemplates.Add(template);
                 await _context.SaveChangesAsync(cancellationToken);
@@ -86,7 +86,7 @@ namespace DT.EmailWorker.Repositories.Implementations
         {
             try
             {
-                template.UpdatedAt = DateTime.UtcNow;
+                template.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                 _context.EmailTemplates.Update(template);
                 await _context.SaveChangesAsync(cancellationToken);
@@ -107,7 +107,7 @@ namespace DT.EmailWorker.Repositories.Implementations
                 {
                     // Soft delete by setting IsActive to false
                     template.IsActive = false;
-                    template.UpdatedAt = DateTime.UtcNow;
+                    template.UpdatedAt = DateTime.UtcNow.AddHours(3);
                     await _context.SaveChangesAsync(cancellationToken);
                 }
             }

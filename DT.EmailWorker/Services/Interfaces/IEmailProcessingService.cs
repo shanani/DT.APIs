@@ -40,7 +40,7 @@ namespace DT.EmailWorker.Services.Interfaces
         public string? ErrorMessage { get; set; }
         public Exception? Exception { get; set; }
         public long ProcessingTimeMs { get; set; }
-        public DateTime ProcessedAt { get; set; } = DateTime.UtcNow;
+        public DateTime ProcessedAt { get; set; } = DateTime.UtcNow.AddHours(3);
         public string? MessageId { get; set; }
     }
 

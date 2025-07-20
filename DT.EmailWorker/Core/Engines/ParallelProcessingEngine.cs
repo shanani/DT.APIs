@@ -33,13 +33,13 @@ namespace DT.EmailWorker.Core.Engines
             var result = new ParallelProcessingResult<T>
             {
                 TotalItems = itemList.Count,
-                StartTime = DateTime.UtcNow
+                StartTime = DateTime.UtcNow.AddHours(3)
             };
 
             if (!itemList.Any())
             {
                 result.IsSuccess = true;
-                result.EndTime = DateTime.UtcNow;
+                result.EndTime = DateTime.UtcNow.AddHours(3);
                 return result;
             }
 
@@ -104,7 +104,7 @@ namespace DT.EmailWorker.Core.Engines
                 result.SuccessfulItems = successfulCount;
                 result.FailedItems = failedCount;
                 result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
-                result.EndTime = DateTime.UtcNow;
+                result.EndTime = DateTime.UtcNow.AddHours(3);
                 result.IsSuccess = result.FailedItems == 0;
                 result.SuccessRate = result.TotalItems > 0 ? (double)result.SuccessfulItems / result.TotalItems * 100 : 0;
                 result.ProcessedItems = successfulItems.ToList();
@@ -118,7 +118,7 @@ namespace DT.EmailWorker.Core.Engines
                 _logger.LogError(ex, "Critical error in parallel processing engine");
                 result.IsSuccess = false;
                 result.ErrorMessage = ex.Message;
-                result.EndTime = DateTime.UtcNow;
+                result.EndTime = DateTime.UtcNow.AddHours(3);
                 result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
             }
 
@@ -139,13 +139,13 @@ namespace DT.EmailWorker.Core.Engines
             {
                 TotalItems = itemList.Count,
                 BatchSize = batchSize,
-                StartTime = DateTime.UtcNow
+                StartTime = DateTime.UtcNow.AddHours(3)
             };
 
             if (!itemList.Any())
             {
                 result.IsSuccess = true;
-                result.EndTime = DateTime.UtcNow;
+                result.EndTime = DateTime.UtcNow.AddHours(3);
                 return result;
             }
 
@@ -216,7 +216,7 @@ namespace DT.EmailWorker.Core.Engines
 
                 stopwatch.Stop();
                 result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
-                result.EndTime = DateTime.UtcNow;
+                result.EndTime = DateTime.UtcNow.AddHours(3);
                 result.IsSuccess = result.FailedBatches == 0;
                 result.SuccessRate = result.TotalItems > 0 ? (double)result.SuccessfulItems / result.TotalItems * 100 : 0;
 
@@ -228,7 +228,7 @@ namespace DT.EmailWorker.Core.Engines
                 _logger.LogError(ex, "Critical error in batch processing engine");
                 result.IsSuccess = false;
                 result.ErrorMessage = ex.Message;
-                result.EndTime = DateTime.UtcNow;
+                result.EndTime = DateTime.UtcNow.AddHours(3);
                 result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
             }
 

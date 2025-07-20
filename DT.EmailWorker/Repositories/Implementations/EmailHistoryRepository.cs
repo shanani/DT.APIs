@@ -25,7 +25,7 @@ namespace DT.EmailWorker.Repositories.Implementations
         {
             try
             {
-                emailHistory.CreatedAt = DateTime.UtcNow;
+                emailHistory.CreatedAt = DateTime.UtcNow.AddHours(3);
 
                 _context.EmailHistory.Add(emailHistory);
                 await _context.SaveChangesAsync(cancellationToken);

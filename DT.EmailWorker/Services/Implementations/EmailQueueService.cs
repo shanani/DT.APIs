@@ -28,7 +28,7 @@ namespace DT.EmailWorker.Services.Implementations
             {
                 var pendingEmails = await _context.EmailQueue
                     .Where(e => e.Status == EmailQueueStatus.Queued &&
-                               (!e.IsScheduled || e.ScheduledFor <= DateTime.UtcNow))
+                               (!e.IsScheduled || e.ScheduledFor <= DateTime.UtcNow.AddHours(3)))
                     .OrderBy(e => e.Priority)
                     .ThenBy(e => e.CreatedAt)
                     .Take(batchSize)
@@ -55,7 +55,7 @@ namespace DT.EmailWorker.Services.Implementations
                 var dueEmails = await _context.EmailQueue
                     .Where(e => e.Status == EmailQueueStatus.Scheduled &&
                                e.IsScheduled &&
-                               e.ScheduledFor <= DateTime.UtcNow)
+                               e.ScheduledFor <= DateTime.UtcNow.AddHours(3))
                     .OrderBy(e => e.ScheduledFor)
                     .Take(batchSize)
                     .ToListAsync();
@@ -83,9 +83,9 @@ namespace DT.EmailWorker.Services.Implementations
                 if (email != null)
                 {
                     email.Status = EmailQueueStatus.Processing;
-                    email.ProcessingStartedAt = DateTime.UtcNow;
+                    email.ProcessingStartedAt = DateTime.UtcNow.AddHours(3);
                     email.ProcessedBy = workerId;
-                    email.UpdatedAt = DateTime.UtcNow;
+                    email.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                     await _context.SaveChangesAsync();
 
@@ -112,9 +112,9 @@ namespace DT.EmailWorker.Services.Implementations
                 if (email != null)
                 {
                     email.Status = EmailQueueStatus.Sent;
-                    email.ProcessedAt = DateTime.UtcNow;
+                    email.ProcessedAt = DateTime.UtcNow.AddHours(3);
                     email.ProcessedBy = workerId;
-                    email.UpdatedAt = DateTime.UtcNow;
+                    email.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                     await _context.SaveChangesAsync();
 
@@ -140,7 +140,7 @@ namespace DT.EmailWorker.Services.Implementations
                 {
                     email.RetryCount++;
                     email.ErrorMessage = errorMessage;
-                    email.UpdatedAt = DateTime.UtcNow;
+                    email.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                     // Determine if should retry based on retry count
                     const int maxRetries = 3;
@@ -153,7 +153,7 @@ namespace DT.EmailWorker.Services.Implementations
                     else
                     {
                         email.Status = EmailQueueStatus.Failed;
-                        email.ProcessedAt = DateTime.UtcNow;
+                        email.ProcessedAt = DateTime.UtcNow.AddHours(3);
                     }
 
                     await _context.SaveChangesAsync();
@@ -287,7 +287,7 @@ namespace DT.EmailWorker.Services.Implementations
                 if (email != null && (email.Status == EmailQueueStatus.Queued || email.Status == EmailQueueStatus.Scheduled))
                 {
                     email.Status = EmailQueueStatus.Cancelled;
-                    email.UpdatedAt = DateTime.UtcNow;
+                    email.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                     await _context.SaveChangesAsync();
 
@@ -334,7 +334,7 @@ namespace DT.EmailWorker.Services.Implementations
                 if (oldestQueued != null)
                 {
                     stats.OldestQueuedEmail = oldestQueued.CreatedAt;
-                    stats.AverageQueueTimeHours = (DateTime.UtcNow - oldestQueued.CreatedAt).TotalHours;
+                    stats.AverageQueueTimeHours = (DateTime.UtcNow.AddHours(3) - oldestQueued.CreatedAt).TotalHours;
                 }
 
                 return stats;
@@ -350,7 +350,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var threshold = DateTime.UtcNow.AddMinutes(-stuckThresholdMinutes);
+                var threshold = DateTime.UtcNow.AddHours(3).AddMinutes(-stuckThresholdMinutes);
 
                 var stuckEmails = await _context.EmailQueue
                     .Where(e => e.Status == EmailQueueStatus.Processing &&
@@ -372,7 +372,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var threshold = DateTime.UtcNow.AddMinutes(-stuckThresholdMinutes);
+                var threshold = DateTime.UtcNow.AddHours(3).AddMinutes(-stuckThresholdMinutes);
 
                 var stuckEmails = await _context.EmailQueue
                     .Where(e => e.Status == EmailQueueStatus.Processing &&
@@ -384,7 +384,7 @@ namespace DT.EmailWorker.Services.Implementations
                     email.Status = EmailQueueStatus.Queued;
                     email.ProcessingStartedAt = null;
                     email.ProcessedBy = null;
-                    email.UpdatedAt = DateTime.UtcNow;
+                    email.UpdatedAt = DateTime.UtcNow.AddHours(3);
                 }
 
                 await _context.SaveChangesAsync();
@@ -424,7 +424,7 @@ namespace DT.EmailWorker.Services.Implementations
                 if (email != null && (email.Status == EmailQueueStatus.Queued || email.Status == EmailQueueStatus.Scheduled))
                 {
                     email.Priority = priority;
-                    email.UpdatedAt = DateTime.UtcNow;
+                    email.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                     await _context.SaveChangesAsync();
 
@@ -453,7 +453,7 @@ namespace DT.EmailWorker.Services.Implementations
                     email.ScheduledFor = scheduledFor;
                     email.IsScheduled = true;
                     email.Status = EmailQueueStatus.Scheduled;
-                    email.UpdatedAt = DateTime.UtcNow;
+                    email.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                     await _context.SaveChangesAsync();
 

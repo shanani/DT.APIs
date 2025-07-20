@@ -11,7 +11,7 @@ namespace DT.EmailWorker.Monitoring.Metrics
         private readonly ConcurrentDictionary<string, MetricCounter> _counters = new();
         private readonly ConcurrentQueue<ProcessingEvent> _recentEvents = new();
         private readonly object _lockObject = new();
-        private DateTime _lastReset = DateTime.UtcNow;
+        private DateTime _lastReset = DateTime.UtcNow.AddHours(3);
 
         /// <summary>
         /// Record email processing event
@@ -20,7 +20,7 @@ namespace DT.EmailWorker.Monitoring.Metrics
         {
             var eventData = new ProcessingEvent
             {
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTime.UtcNow.AddHours(3),
                 EventType = success ? EventType.EmailSent : EventType.EmailFailed,
                 ProcessingTimeMs = processingTimeMs,
                 Priority = priority
@@ -46,7 +46,7 @@ namespace DT.EmailWorker.Monitoring.Metrics
         {
             var eventData = new ProcessingEvent
             {
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTime.UtcNow.AddHours(3),
                 EventType = EventType.BatchProcessed,
                 ProcessingTimeMs = totalProcessingTimeMs,
                 BatchSize = emailCount,
@@ -70,7 +70,7 @@ namespace DT.EmailWorker.Monitoring.Metrics
         {
             var eventData = new ProcessingEvent
             {
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTime.UtcNow.AddHours(3),
                 EventType = success ? EventType.TemplateProcessed : EventType.TemplateError,
                 ProcessingTimeMs = processingTimeMs,
                 TemplateName = templateName
@@ -90,7 +90,7 @@ namespace DT.EmailWorker.Monitoring.Metrics
         {
             var eventData = new ProcessingEvent
             {
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTime.UtcNow.AddHours(3),
                 EventType = healthy ? EventType.HealthCheckPassed : EventType.HealthCheckFailed,
                 ProcessingTimeMs = responseTimeMs,
                 HealthCheckName = checkName
@@ -110,7 +110,7 @@ namespace DT.EmailWorker.Monitoring.Metrics
         {
             lock (_lockObject)
             {
-                var now = DateTime.UtcNow;
+                var now = DateTime.UtcNow.AddHours(3);
                 var last24Hours = _recentEvents.Where(e => e.Timestamp >= now.AddHours(-24)).ToList();
                 var lastHour = _recentEvents.Where(e => e.Timestamp >= now.AddHours(-1)).ToList();
 
@@ -188,7 +188,7 @@ namespace DT.EmailWorker.Monitoring.Metrics
             {
                 _counters.Clear();
                 _recentEvents.Clear();
-                _lastReset = DateTime.UtcNow;
+                _lastReset = DateTime.UtcNow.AddHours(3);
             }
         }
 
@@ -216,11 +216,11 @@ namespace DT.EmailWorker.Monitoring.Metrics
         private void IncrementCounter(string key, int increment = 1)
         {
             _counters.AddOrUpdate(key,
-                new MetricCounter { Count = increment, LastUpdated = DateTime.UtcNow },
+                new MetricCounter { Count = increment, LastUpdated = DateTime.UtcNow.AddHours(3) },
                 (k, existing) =>
                 {
                     existing.Count += increment;
-                    existing.LastUpdated = DateTime.UtcNow;
+                    existing.LastUpdated = DateTime.UtcNow.AddHours(3);
                     return existing;
                 });
         }
@@ -234,19 +234,19 @@ namespace DT.EmailWorker.Monitoring.Metrics
         {
             var key = "AverageProcessingTime";
             _counters.AddOrUpdate(key,
-                new MetricCounter { Count = 1, Sum = processingTimeMs, LastUpdated = DateTime.UtcNow },
+                new MetricCounter { Count = 1, Sum = processingTimeMs, LastUpdated = DateTime.UtcNow.AddHours(3) },
                 (k, existing) =>
                 {
                     existing.Count++;
                     existing.Sum += processingTimeMs;
-                    existing.LastUpdated = DateTime.UtcNow;
+                    existing.LastUpdated = DateTime.UtcNow.AddHours(3);
                     return existing;
                 });
         }
 
         private void CleanOldEvents()
         {
-            var cutoff = DateTime.UtcNow.AddHours(-24);
+            var cutoff = DateTime.UtcNow.AddHours(3).AddHours(-24);
             while (_recentEvents.TryPeek(out var oldestEvent) && oldestEvent.Timestamp < cutoff)
             {
                 _recentEvents.TryDequeue(out _);

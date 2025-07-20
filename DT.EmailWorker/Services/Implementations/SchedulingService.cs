@@ -30,8 +30,8 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                scheduledEmail.CreatedAt = DateTime.UtcNow;
-                scheduledEmail.UpdatedAt = DateTime.UtcNow;
+                scheduledEmail.CreatedAt = DateTime.UtcNow.AddHours(3);
+                scheduledEmail.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                 _context.ScheduledEmails.Add(scheduledEmail);
                 await _context.SaveChangesAsync(cancellationToken);
@@ -52,7 +52,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var now = DateTime.UtcNow;
+                var now = DateTime.UtcNow.AddHours(3);
 
                 return await _context.ScheduledEmails
                     .Where(se => se.NextRunTime <= now && se.IsActive && (se.ExecutionCount == 0 || se.IsRecurring))
@@ -84,7 +84,7 @@ namespace DT.EmailWorker.Services.Implementations
                 }
 
                 scheduledEmail.IsActive = false;
-                scheduledEmail.UpdatedAt = DateTime.UtcNow;
+                scheduledEmail.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                 await _context.SaveChangesAsync(cancellationToken);
 
@@ -117,7 +117,7 @@ namespace DT.EmailWorker.Services.Implementations
 
                 var oldSendTime = scheduledEmail.NextRunTime;
                 scheduledEmail.NextRunTime = newSendTime;
-                scheduledEmail.UpdatedAt = DateTime.UtcNow;
+                scheduledEmail.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                 await _context.SaveChangesAsync(cancellationToken);
 
@@ -183,8 +183,8 @@ namespace DT.EmailWorker.Services.Implementations
 
                         // Update scheduled email tracking with correct property names
                         scheduledEmail.ExecutionCount++;
-                        scheduledEmail.LastExecutedAt = DateTime.UtcNow;
-                        scheduledEmail.UpdatedAt = DateTime.UtcNow;
+                        scheduledEmail.LastExecutedAt = DateTime.UtcNow.AddHours(3);
+                        scheduledEmail.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                         // Handle recurring emails
                         if (scheduledEmail.IsRecurring)
@@ -209,7 +209,7 @@ namespace DT.EmailWorker.Services.Implementations
                         // Update error tracking
                         scheduledEmail.LastExecutionError = ex.Message;
                         scheduledEmail.LastExecutionStatus = EmailQueueStatus.Failed;
-                        scheduledEmail.UpdatedAt = DateTime.UtcNow;
+                        scheduledEmail.UpdatedAt = DateTime.UtcNow.AddHours(3);
                     }
                 }
 

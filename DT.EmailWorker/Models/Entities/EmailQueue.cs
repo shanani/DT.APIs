@@ -135,7 +135,7 @@ namespace DT.EmailWorker.Models.Entities
         /// <summary>
         /// When the email was created
         /// </summary>
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
 
         /// <summary>
         /// When the email was last updated - FIXED: Made nullable

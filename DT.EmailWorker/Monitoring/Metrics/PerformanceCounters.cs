@@ -45,7 +45,7 @@ namespace DT.EmailWorker.Monitoring.Metrics
         {
             lock (_lockObject)
             {
-                var cutoff = DateTime.UtcNow - period;
+                var cutoff = DateTime.UtcNow.AddHours(3) - period;
                 var relevantData = _historicalData
                     .Where(d => d.Timestamp >= cutoff)
                     .ToList();
@@ -159,7 +159,7 @@ namespace DT.EmailWorker.Monitoring.Metrics
         {
             lock (_lockObject)
             {
-                var cutoff = DateTime.UtcNow - period;
+                var cutoff = DateTime.UtcNow.AddHours(3) - period;
                 var relevantData = _historicalData
                     .Where(d => d.Timestamp >= cutoff)
                     .OrderBy(d => d.Timestamp)
@@ -216,7 +216,7 @@ namespace DT.EmailWorker.Monitoring.Metrics
 
                 _currentData = new PerformanceData
                 {
-                    Timestamp = DateTime.UtcNow,
+                    Timestamp = DateTime.UtcNow.AddHours(3),
 
                     // CPU
                     CpuUsagePercent = GetCpuUsage(),
@@ -251,13 +251,13 @@ namespace DT.EmailWorker.Monitoring.Metrics
             {
                 // This is a simplified CPU usage calculation
                 // For production, consider using PerformanceCounter for more accurate results
-                var startTime = DateTime.UtcNow;
+                var startTime = DateTime.UtcNow.AddHours(3);
                 var startCpuUsage = _currentProcess.TotalProcessorTime;
 
                 Thread.Sleep(100); // Small delay for measurement
 
                 _currentProcess.Refresh();
-                var endTime = DateTime.UtcNow;
+                var endTime = DateTime.UtcNow.AddHours(3);
                 var endCpuUsage = _currentProcess.TotalProcessorTime;
 
                 var cpuUsedMs = (endCpuUsage - startCpuUsage).TotalMilliseconds;

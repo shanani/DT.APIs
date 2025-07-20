@@ -101,7 +101,7 @@ namespace DT.EmailWorker.Models.DTOs
         /// <summary>
         /// When the email was created
         /// </summary>
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
 
         /// <summary>
         /// Who created the email request

@@ -78,7 +78,7 @@ namespace DT.EmailWorker.Workers
             CancellationToken cancellationToken)
         {
             var report = new System.Text.StringBuilder();
-            var reportDate = DateTime.UtcNow;
+            var reportDate = DateTime.UtcNow.AddHours(3);
 
             report.AppendLine($"DT.EmailWorker Daily Status Report - {reportDate:yyyy-MM-dd HH:mm:ss} UTC");
             report.AppendLine("=".PadRight(70, '='));
@@ -96,7 +96,7 @@ namespace DT.EmailWorker.Workers
                 report.AppendLine($"Error Rate: {healthStatus.ErrorRate:F2}%");
 
                 // Calculate uptime if possible
-                var uptime = DateTime.UtcNow - healthStatus.StartedAt;
+                var uptime = DateTime.UtcNow.AddHours(3) - healthStatus.StartedAt;
                 report.AppendLine($"Uptime: {uptime.Days}d {uptime.Hours}h {uptime.Minutes}m");
                 report.AppendLine();
             }
@@ -221,7 +221,7 @@ namespace DT.EmailWorker.Workers
                 var emailRequest = new Models.DTOs.EmailProcessingRequest
                 {
                     ToEmails = _settings.StatusReportEmail!,
-                    Subject = $"DT.EmailWorker Status Report - {DateTime.UtcNow:yyyy-MM-dd}",
+                    Subject = $"DT.EmailWorker Status Report - {DateTime.UtcNow.AddHours(3):yyyy-MM-dd}",
                     Body = $"<pre>{reportContent}</pre>",
                     IsHtml = true,
                     Priority = Models.Enums.EmailPriority.High,

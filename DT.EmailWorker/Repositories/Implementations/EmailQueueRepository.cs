@@ -63,7 +63,7 @@ namespace DT.EmailWorker.Repositories.Implementations
         {
             try
             {
-                var retryAfter = DateTime.UtcNow.AddMinutes(-30); // Wait 30 minutes before retry
+                var retryAfter = DateTime.UtcNow.AddHours(3).AddMinutes(-30); // Wait 30 minutes before retry
 
                 return await _context.EmailQueue
                     .Include(e => e.Attachments)
@@ -89,15 +89,15 @@ namespace DT.EmailWorker.Repositories.Implementations
                 if (email != null)
                 {
                     email.Status = status;
-                    email.UpdatedAt = DateTime.UtcNow;
+                    email.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                     if (status == EmailQueueStatus.Processing)
                     {
-                        email.ProcessingStartedAt = DateTime.UtcNow;
+                        email.ProcessingStartedAt = DateTime.UtcNow.AddHours(3);
                     }
                     else if (status == EmailQueueStatus.Sent)
                     {
-                        email.SentAt = DateTime.UtcNow;
+                        email.SentAt = DateTime.UtcNow.AddHours(3);
                     }
                     else if (status == EmailQueueStatus.Failed)
                     {
@@ -123,7 +123,7 @@ namespace DT.EmailWorker.Repositories.Implementations
                 {
                     email.RetryCount++;
                     email.ErrorMessage = errorMessage;
-                    email.UpdatedAt = DateTime.UtcNow;
+                    email.UpdatedAt = DateTime.UtcNow.AddHours(3);
                     email.Status = EmailQueueStatus.Failed;
 
                     await _context.SaveChangesAsync(cancellationToken);
@@ -197,7 +197,7 @@ namespace DT.EmailWorker.Repositories.Implementations
                 }
 
                 statistics.TotalCount = stats.Sum(s => s.Count);
-                statistics.LastUpdated = DateTime.UtcNow;
+                statistics.LastUpdated = DateTime.UtcNow.AddHours(3);
 
                 return statistics;
             }

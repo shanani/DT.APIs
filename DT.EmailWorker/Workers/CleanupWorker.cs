@@ -138,7 +138,7 @@ namespace DT.EmailWorker.Workers
         {
             var result = new CleanupResult
             {
-                StartTime = DateTime.UtcNow,
+                StartTime = DateTime.UtcNow.AddHours(3),
                 IsAggressiveCleanup = false
             };
 
@@ -150,14 +150,14 @@ namespace DT.EmailWorker.Workers
                 result.ServiceStatusRecordsDeleted = await cleanupService.CleanupServiceStatusAsync(_cleanupSettings.ServiceStatusRetentionDays);
 
                 result.IsSuccess = true;
-                result.EndTime = DateTime.UtcNow;
+                result.EndTime = DateTime.UtcNow.AddHours(3);
 
                 _logger.LogInformation("Standard cleanup completed successfully");
             }
             catch (Exception ex)
             {
                 result.IsSuccess = false;
-                result.EndTime = DateTime.UtcNow;
+                result.EndTime = DateTime.UtcNow.AddHours(3);
                 result.Errors.Add($"Standard cleanup failed: {ex.Message}");
 
                 _logger.LogError(ex, "Standard cleanup failed");
@@ -171,7 +171,7 @@ namespace DT.EmailWorker.Workers
         {
             var result = new CleanupResult
             {
-                StartTime = DateTime.UtcNow,
+                StartTime = DateTime.UtcNow.AddHours(3),
                 IsAggressiveCleanup = true
             };
 
@@ -190,14 +190,14 @@ namespace DT.EmailWorker.Workers
                 result.AttachmentsDeleted = await cleanupService.CleanupEmailAttachmentsAsync(_cleanupSettings.FailedEmailsRetentionDays);
 
                 result.IsSuccess = true;
-                result.EndTime = DateTime.UtcNow;
+                result.EndTime = DateTime.UtcNow.AddHours(3);
 
                 _logger.LogInformation("Aggressive cleanup completed successfully");
             }
             catch (Exception ex)
             {
                 result.IsSuccess = false;
-                result.EndTime = DateTime.UtcNow;
+                result.EndTime = DateTime.UtcNow.AddHours(3);
                 result.Errors.Add($"Aggressive cleanup failed: {ex.Message}");
 
                 _logger.LogError(ex, "Aggressive cleanup failed");
@@ -249,7 +249,7 @@ namespace DT.EmailWorker.Workers
                 var diskAnalysis = await cleanupService.AnalyzeDiskSpaceAsync();
                 var duration = cleanupResult.EndTime - cleanupResult.StartTime;
 
-                var reportSubject = $"Cleanup Report - {(isAggressive ? "Aggressive" : "Standard")} - {DateTime.UtcNow:yyyy-MM-dd}";
+                var reportSubject = $"Cleanup Report - {(isAggressive ? "Aggressive" : "Standard")} - {DateTime.UtcNow.AddHours(3):yyyy-MM-dd}";
 
                 var reportBody = $@"
                     <h2>Email Worker Cleanup Report</h2>

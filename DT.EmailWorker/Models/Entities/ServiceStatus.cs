@@ -36,7 +36,7 @@ namespace DT.EmailWorker.Models.Entities
         /// <summary>
         /// Last heartbeat timestamp
         /// </summary>
-        public DateTime LastHeartbeat { get; set; } = DateTime.UtcNow;
+        public DateTime LastHeartbeat { get; set; } = DateTime.UtcNow.AddHours(3);
 
         // Performance Metrics
         /// <summary>
@@ -102,12 +102,12 @@ namespace DT.EmailWorker.Models.Entities
         /// <summary>
         /// When the service was started
         /// </summary>
-        public DateTime StartedAt { get; set; } = DateTime.UtcNow;
+        public DateTime StartedAt { get; set; } = DateTime.UtcNow.AddHours(3);
 
         /// <summary>
         /// When the status was last updated
         /// </summary>
-        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
 
         /// <summary>
         /// Last error message if any

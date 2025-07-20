@@ -5,6 +5,9 @@ namespace DT.EmailWorker.Core.Configuration
     /// </summary>
     public class EmailWorkerSettings
     {
+
+      
+
         /// <summary>
         /// Service name for identification
         /// </summary>
@@ -50,5 +53,9 @@ namespace DT.EmailWorker.Core.Configuration
         /// </summary>
         public string Description { get; set; } = "Enterprise Email Processing Service";
         public int MaxConcurrentWorkers { get; internal set; }
+
+
+       
+
     }
 }

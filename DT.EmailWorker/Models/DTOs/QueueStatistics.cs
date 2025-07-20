@@ -33,7 +33,7 @@
         /// <summary>
         /// When statistics were last updated
         /// </summary>
-        public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
+        public DateTime LastUpdated { get; set; } = DateTime.UtcNow.AddHours(3);
 
         // Additional properties for compatibility
         /// <summary>
@@ -109,7 +109,7 @@
         {
             get
             {
-                var timeSinceUpdate = DateTime.UtcNow - LastUpdated;
+                var timeSinceUpdate = DateTime.UtcNow.AddHours(3) - LastUpdated;
                 return timeSinceUpdate.TotalHours > 0
                     ? ProcessingCount / timeSinceUpdate.TotalHours
                     : 0;
@@ -142,7 +142,7 @@
             {
                 if (OldestQueuedEmail == default(DateTime))
                     return 0;
-                return (int)(DateTime.UtcNow - OldestQueuedEmail).TotalHours;
+                return (int)(DateTime.UtcNow.AddHours(3) - OldestQueuedEmail).TotalHours;
             }
         }
     }

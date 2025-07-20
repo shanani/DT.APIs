@@ -25,7 +25,7 @@ namespace DT.EmailWorker.Repositories.Implementations
         {
             try
             {
-                log.CreatedAt = DateTime.UtcNow;
+                log.CreatedAt = DateTime.UtcNow.AddHours(3);
 
                 _context.ProcessingLogs.Add(log);
                 await _context.SaveChangesAsync(cancellationToken);
@@ -50,7 +50,7 @@ namespace DT.EmailWorker.Repositories.Implementations
                 Exception = details, // FIX: Map details to Exception property
                 ContextData = emailId?.ToString(), // FIX: Store emailId in ContextData as string
                 ProcessingStep = operationType, // FIX: Also store in ProcessingStep
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow.AddHours(3)
             };
 
             return await AddAsync(log, cancellationToken);
@@ -152,7 +152,7 @@ namespace DT.EmailWorker.Repositories.Implementations
         {
             try
             {
-                var cutoffDate = DateTime.UtcNow.AddHours(-hoursBack);
+                var cutoffDate = DateTime.UtcNow.AddHours(3).AddHours(-hoursBack);
 
                 return await _context.ProcessingLogs
                     .Where(l => l.CreatedAt >= cutoffDate && l.LogLevel == LogLevel.Error) // FIX: Use LogLevel

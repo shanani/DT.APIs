@@ -141,7 +141,7 @@ namespace DT.EmailWorker.Monitoring.Alerts
         {
             lock (_lockObject)
             {
-                var cutoff = DateTime.UtcNow - period;
+                var cutoff = DateTime.UtcNow.AddHours(3) - period;
                 var recentAlerts = _alertHistory.Where(a => a.Timestamp >= cutoff).ToList();
 
                 return new AlertStatistics
@@ -299,7 +299,7 @@ namespace DT.EmailWorker.Monitoring.Alerts
                 var payload = new
                 {
                     BatchId = Guid.NewGuid().ToString(),
-                    Timestamp = DateTime.UtcNow,
+                    Timestamp = DateTime.UtcNow.AddHours(3),
                     AlertCount = alerts.Count,
                     Service = "DT.EmailWorker",
                     Alerts = alerts.Select(a => new

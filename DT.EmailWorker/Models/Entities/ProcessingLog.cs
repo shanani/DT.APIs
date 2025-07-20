@@ -68,7 +68,7 @@ namespace DT.EmailWorker.Models.Entities
         /// <summary>
         /// When the log was created
         /// </summary>
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
 
         /// <summary>
         /// Machine name where the log was generated

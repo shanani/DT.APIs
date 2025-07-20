@@ -58,7 +58,7 @@ namespace DT.EmailWorker.Services.Implementations
                         ServiceName = _serviceName,
                         MachineName = machineName,
                         ServiceVersion = _serviceVersion,
-                        StartedAt = DateTime.UtcNow,
+                        StartedAt = DateTime.UtcNow.AddHours(3),
                         // ← ADD THESE LINES:
                         MaxConcurrentWorkers = _processingSettings.MaxConcurrentWorkers,
                         BatchSize = _processingSettings.BatchSize
@@ -67,8 +67,8 @@ namespace DT.EmailWorker.Services.Implementations
                 }
 
                 serviceStatus.Status = status;
-                serviceStatus.LastHeartbeat = DateTime.UtcNow;
-                serviceStatus.UpdatedAt = DateTime.UtcNow;
+                serviceStatus.LastHeartbeat = DateTime.UtcNow.AddHours(3);
+                serviceStatus.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                 // ← ADD THESE LINES TO UPDATE CONFIG VALUES:
                 serviceStatus.MaxConcurrentWorkers = _processingSettings.MaxConcurrentWorkers;
@@ -351,7 +351,7 @@ namespace DT.EmailWorker.Services.Implementations
                     serviceStatus.CpuUsagePercent = metrics.CpuUsagePercent;
                     serviceStatus.MemoryUsageMB = metrics.MemoryUsageMB;
                     serviceStatus.DiskUsagePercent = metrics.DiskUsagePercent;
-                    serviceStatus.UpdatedAt = DateTime.UtcNow;
+                    serviceStatus.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
                     await _context.SaveChangesAsync();
                 }
@@ -370,8 +370,8 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var startTime = DateTime.UtcNow.AddHours(-hours);
-                var endTime = DateTime.UtcNow;
+                var startTime = DateTime.UtcNow.AddHours(3).AddHours(-hours);
+                var endTime = DateTime.UtcNow.AddHours(3);
 
                 var processedEmails = await _context.EmailHistory
                     .Where(h => h.SentAt >= startTime && h.SentAt <= endTime)
@@ -452,7 +452,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var thresholdTime = DateTime.UtcNow.AddMinutes(-heartbeatThresholdMinutes);
+                var thresholdTime = DateTime.UtcNow.AddHours(3).AddMinutes(-heartbeatThresholdMinutes);
 
                 var unhealthyServices = await _context.ServiceStatus
                     .Where(s => s.Status != ServiceHealthStatus.Healthy || s.LastHeartbeat < thresholdTime)
@@ -479,7 +479,7 @@ namespace DT.EmailWorker.Services.Implementations
                     MemoryUsageMB = totalMemory / 1024 / 1024,
                     ProcessCount = Process.GetProcesses().Length,
                     ThreadCount = process.Threads.Count,
-                    Uptime = DateTime.UtcNow - process.StartTime
+                    Uptime = DateTime.UtcNow.AddHours(3) - process.StartTime
                 };
             }
             catch (Exception ex)
@@ -513,7 +513,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
+                var cutoffDate = DateTime.UtcNow.AddHours(3).AddDays(-retentionDays);
 
                 var recordsToDelete = await _context.ProcessingLogs
                     .Where(l => l.CreatedAt < cutoffDate)

@@ -1,4 +1,4 @@
-using DT.EmailWorker.Core.Configuration;
+﻿using DT.EmailWorker.Core.Configuration;
 using DT.EmailWorker.Data;
 using DT.EmailWorker.Models.Enums;
 using DT.EmailWorker.Services.Interfaces;
@@ -34,7 +34,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
+                var cutoffDate = DateTime.UtcNow.AddHours(3).AddDays(-retentionDays);
                 var oldRecords = await _context.EmailHistory
                     .Where(h => h.SentAt < cutoffDate)
                     .Take(_settings.MaxRecordsPerCleanup)
@@ -60,7 +60,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
+                var cutoffDate = DateTime.UtcNow.AddHours(3).AddDays(-retentionDays);
 
                 var oldLogs = await _context.ProcessingLogs
                     .Where(l => l.CreatedAt < cutoffDate)
@@ -89,7 +89,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
+                var cutoffDate = DateTime.UtcNow.AddHours(3).AddDays(-retentionDays);
 
                 var oldAttachments = await _context.EmailAttachments
                     .Where(a => a.CreatedAt < cutoffDate)
@@ -118,7 +118,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
+                var cutoffDate = DateTime.UtcNow.AddHours(3).AddDays(-retentionDays);
 
                 var oldStatuses = await _context.ServiceStatus
                     .Where(s => s.UpdatedAt < cutoffDate)
@@ -148,7 +148,7 @@ namespace DT.EmailWorker.Services.Implementations
             try
             {
                 var result = new ArchiveResult();
-                var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
+                var cutoffDate = DateTime.UtcNow.AddHours(3).AddDays(-retentionDays);
 
                 var recordsToArchive = await _context.EmailHistory
                     .Where(h => h.SentAt < cutoffDate)
@@ -163,7 +163,7 @@ namespace DT.EmailWorker.Services.Implementations
                 }
 
                 // Create archive file
-                var fileName = $"EmailHistory_Archive_{DateTime.UtcNow:yyyyMMdd_HHmmss}.json.gz";
+                var fileName = $"EmailHistory_Archive_{DateTime.UtcNow.AddHours(3):yyyyMMdd_HHmmss}.json.gz";
                 var filePath = Path.Combine(archivePath ?? _settings.BackupPath, fileName);
 
                 Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
@@ -201,7 +201,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
+                var cutoffDate = DateTime.UtcNow.AddHours(3).AddDays(-retentionDays);
 
                 var failedEmails = await _context.EmailQueue
                     .Where(q => q.Status == EmailQueueStatus.Failed && q.UpdatedAt < cutoffDate)
@@ -259,7 +259,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             var summary = new CleanupSummary
             {
-                CleanupStarted = DateTime.UtcNow
+                CleanupStarted = DateTime.UtcNow.AddHours(3)
             };
 
             try
@@ -290,7 +290,7 @@ namespace DT.EmailWorker.Services.Implementations
                     summary.DatabaseOptimized = await OptimizeDatabaseAsync();
                 }
 
-                summary.CleanupCompleted = DateTime.UtcNow;
+                summary.CleanupCompleted = DateTime.UtcNow.AddHours(3);
                 summary.TotalProcessingTime = summary.CleanupCompleted - summary.CleanupStarted;
 
                 _logger.LogInformation("Full cleanup completed. Records cleaned: History={EmailHistory}, Logs={ProcessingLogs}, Attachments={Attachments}, Failed={Failed}, Orphaned={Orphaned}",
@@ -342,7 +342,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var now = DateTime.UtcNow;
+                var now = DateTime.UtcNow.AddHours(3);
                 var thirtyDaysAgo = now.AddDays(-30);
                 var ninetyDaysAgo = now.AddDays(-90);
                 var oneEightyDaysAgo = now.AddDays(-180);
@@ -365,7 +365,7 @@ namespace DT.EmailWorker.Services.Implementations
 
                 if (oldestHistory != null)
                 {
-                    stats.OldestRecord = oldestHistory.SentAt ?? DateTime.UtcNow; // Handle nullable DateTime
+                    stats.OldestRecord = oldestHistory.SentAt ?? DateTime.UtcNow.AddHours(3); // Handle nullable DateTime
                 }
 
                 return stats;
@@ -381,7 +381,7 @@ namespace DT.EmailWorker.Services.Implementations
         {
             try
             {
-                var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
+                var cutoffDate = DateTime.UtcNow.AddHours(3).AddDays(-retentionDays);
 
                 var estimate = new CleanupEstimate
                 {
@@ -419,9 +419,9 @@ namespace DT.EmailWorker.Services.Implementations
             try
             {
                 var result = new BackupResult();
-                var startTime = DateTime.UtcNow;
+                var startTime = DateTime.UtcNow.AddHours(3);
 
-                var fileName = $"EmailWorker_Backup_{DateTime.UtcNow:yyyyMMdd_HHmmss}.bak";
+                var fileName = $"EmailWorker_Backup_{DateTime.UtcNow.AddHours(3):yyyyMMdd_HHmmss}.bak";
                 var filePath = Path.Combine(backupPath ?? _settings.BackupPath, fileName);
 
                 Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
@@ -440,7 +440,7 @@ namespace DT.EmailWorker.Services.Implementations
 
                 result.Success = true;
                 result.BackupFilePath = filePath;
-                result.ProcessingTime = DateTime.UtcNow - startTime;
+                result.ProcessingTime = DateTime.UtcNow.AddHours(3) - startTime;
 
                 // Get file size
                 if (File.Exists(filePath))
@@ -473,7 +473,7 @@ namespace DT.EmailWorker.Services.Implementations
                     return 0;
                 }
 
-                var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
+                var cutoffDate = DateTime.UtcNow.AddHours(3).AddDays(-retentionDays);
                 var oldBackups = backupDirectory.GetFiles("*.bak")
                     .Where(f => f.CreationTime < cutoffDate)
                     .ToList();
@@ -499,19 +499,19 @@ namespace DT.EmailWorker.Services.Implementations
             {
                 var analysis = new DiskSpaceAnalysis();
 
-                // Get database size
-                var sizeSql = @"
-                    SELECT 
-                        SUM(size * 8.0 / 1024 / 1024) as SizeGB
-                    FROM sys.master_files 
-                    WHERE database_id = DB_ID()";
+                // 🚀 FIX: Use FormattableString (notice the $ prefix)
+                var dbSizeResult = await _context.Database
+                    .SqlQuery<decimal>($@"
+                SELECT 
+                    SUM(size * 8.0 / 1024 / 1024) as Value
+                FROM sys.master_files 
+                WHERE database_id = DB_ID()")
+                    .FirstOrDefaultAsync();
 
-                var dbSizeResult = await _context.Database.SqlQueryRaw<decimal>(sizeSql).FirstOrDefaultAsync();
                 analysis.DatabaseSizeBytes = (long)(dbSizeResult * 1024 * 1024 * 1024);
 
                 // Get drive info
                 var drive = new DriveInfo(Path.GetPathRoot(Environment.CurrentDirectory)!);
-
                 analysis.FreeDiskSpaceBytes = drive.AvailableFreeSpace;
                 analysis.TotalDiskSpaceBytes = drive.TotalSize;
                 analysis.UsedDiskSpaceBytes = drive.TotalSize - drive.AvailableFreeSpace;
@@ -519,8 +519,8 @@ namespace DT.EmailWorker.Services.Implementations
                 analysis.UsedSpacePercent = 100 - analysis.FreeSpacePercent;
                 analysis.DatabaseSpacePercent = (double)analysis.DatabaseSizeBytes / drive.TotalSize * 100;
 
-                // Estimate reclaimable space
-                var cutoffDate = DateTime.UtcNow.AddDays(-_settings.RetentionDays);
+                // 🚀 FIX: Use KSA time correctly
+                var cutoffDate = DateTime.UtcNow.AddHours(3).AddDays(-_settings.RetentionDays);
                 var oldRecordsCount = await _context.EmailHistory.CountAsync(h => h.SentAt < cutoffDate);
 
                 // Rough estimate: 1KB per email history record
@@ -556,15 +556,33 @@ namespace DT.EmailWorker.Services.Implementations
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error analyzing disk space");
-                throw;
+
+                // 🚀 FIX: Return a fallback analysis instead of throwing
+                return new DiskSpaceAnalysis
+                {
+                    DatabaseSizeBytes = 0,
+                    FreeDiskSpaceBytes = 0,
+                    TotalDiskSpaceBytes = 0,
+                    UsedDiskSpaceBytes = 0,
+                    FreeSpacePercent = 0,
+                    UsedSpacePercent = 0,
+                    DatabaseSpacePercent = 0,
+                    EstimatedReclaimableBytes = 0,
+                    IsLowOnSpace = false,
+                    RequiresCleanup = false,
+                    Recommendations = new List<string> { "Unable to analyze disk space - check logs for details" }
+                };
             }
         }
+
+
+
 
         public async Task<CleanupSummary> PerformAggressiveCleanupAsync(int targetFreeSpacePercent)
         {
             var summary = new CleanupSummary
             {
-                CleanupStarted = DateTime.UtcNow
+                CleanupStarted = DateTime.UtcNow.AddHours(3)
             };
 
             try
@@ -598,7 +616,7 @@ namespace DT.EmailWorker.Services.Implementations
                 // Force database optimization
                 summary.DatabaseOptimized = await OptimizeDatabaseAsync();
 
-                summary.CleanupCompleted = DateTime.UtcNow;
+                summary.CleanupCompleted = DateTime.UtcNow.AddHours(3);
                 summary.TotalProcessingTime = summary.CleanupCompleted - summary.CleanupStarted;
 
                 _logger.LogInformation("Aggressive cleanup completed in {Duration}", summary.TotalProcessingTime);

@@ -351,8 +351,8 @@ namespace DT.EmailWorker.Services.Implementations
                     ContentType = a.ContentType ?? "application/octet-stream",
                     Content = a.Content,
                     FilePath = a.FilePath,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow.AddHours(3),
+                    UpdatedAt = DateTime.UtcNow.AddHours(3)
                 }).ToList();
 
                 var result = await _attachmentProcessor.ProcessAttachmentsAsync(emailAttachments);
