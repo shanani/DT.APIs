@@ -45,80 +45,7 @@ namespace DT.APIs.Helpers
             return _configuration[key] ?? throw new ArgumentNullException($"Config key {key} is missing.");
         }
 
-
-
-        public List<ADUserDetails> FindUserDetailsFromSearch(string searchKey)
-        {
-            var debugInfo = new List<string>();
-            var errors = new List<string>();
-            var adUserDetails = new List<ADUserDetails>();
-
-            try
-            {
-                debugInfo.Add($"Starting search with key: '{searchKey}'");
-
-                // Use the existing FindUsers method
-                var adUsers = FindUsers(searchKey);
-                debugInfo.Add($"FindUsers returned {adUsers?.Count ?? 0} users");
-
-                if (adUsers == null || !adUsers.Any())
-                {
-                    debugInfo.Add("No users found from FindUsers method");
-                    throw new InvalidOperationException($"Search completed but no users found. Debug: {string.Join(" | ", debugInfo)}");
-                }
-
-                var usersToProcess = adUsers.Take(10).ToList();
-                debugInfo.Add($"Processing top {usersToProcess.Count} users");
-
-                for (int i = 0; i < usersToProcess.Count; i++)
-                {
-                    var adUser = usersToProcess[i];
-                    try
-                    {
-                        debugInfo.Add($"Processing user {i + 1}: Username='{adUser.UserName}', DisplayName='{adUser.DisplayName}'");
-
-                        if (string.IsNullOrEmpty(adUser.UserName))
-                        {
-                            errors.Add($"User {i + 1}: Username is null or empty");
-                            continue;
-                        }
-
-                        // Get detailed user information using the existing method
-                        var userDetails = GetUserDetailsByUsername(adUser.UserName);
-
-                        if (userDetails != null)
-                        {
-                            debugInfo.Add($"User {i + 1}: Successfully retrieved details for '{adUser.UserName}'");
-                            adUserDetails.Add(userDetails);
-                        }
-                        else
-                        {
-                            errors.Add($"User {i + 1}: GetUserDetailsByUsername returned null for '{adUser.UserName}'");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        errors.Add($"User {i + 1} ('{adUser?.UserName}'): {ex.Message}");
-                        debugInfo.Add($"User {i + 1}: Exception occurred - {ex.GetType().Name}");
-                        continue;
-                    }
-                }
-
-                debugInfo.Add($"Successfully processed {adUserDetails.Count} users out of {usersToProcess.Count}");
-
-                if (!adUserDetails.Any() && errors.Any())
-                {
-                    throw new InvalidOperationException($"No user details retrieved. Errors: {string.Join(" | ", errors)}. Debug: {string.Join(" | ", debugInfo)}");
-                }
-
-                return adUserDetails;
-            }
-            catch (Exception ex)
-            {
-                var allInfo = string.Join(" | ", debugInfo.Concat(errors));
-                throw new InvalidOperationException($"FindUserDetailsFromSearch failed: {ex.Message}. Debug Info: {allInfo}", ex);
-            }
-        }
+         
 
         public List<ADUserDetails> FindUserDetails(string searchKey)
         {
@@ -193,32 +120,55 @@ namespace DT.APIs.Helpers
         }
 
 
-        public List<ADUserModel> FindUsers(string searchKey)
+        // MINIMAL CHANGE: Just modify the return type and final conversion
+        public List<ADUserDetails> FindUsers(string searchKey)
         {
             var adUsers = new List<ADUserModel>();
             searchKey = (searchKey ?? "").Trim();
 
             if (searchKey.Length >= 3)
             {
-
-
-                // Search by sAMAccountName (username)
+                // Search by sAMAccountName (username) - KEEP EXACTLY AS IS
                 using (var user = new UserPrincipal(_principalContext))
                 {
                     user.SamAccountName = searchKey + "*";
                     AddUsersFromSearch(adUsers, user, _principalContext);
                 }
 
-                // Search by DisplayName
+                // Search by DisplayName - KEEP EXACTLY AS IS
                 using (var user = new UserPrincipal(_principalContext))
                 {
                     user.DisplayName = searchKey + "*";
                     AddUsersFromSearch(adUsers, user, _principalContext);
                 }
-
             }
 
-            return adUsers.DistinctBy(u => u.UserName).Take(50).ToList();
+            // ONLY CHANGE: Convert ADUserModel results to ADUserDetails using existing method
+            var adUserDetails = new List<ADUserDetails>();
+            var distinctUsers = adUsers.DistinctBy(u => u.UserName).Take(50).ToList();
+
+            foreach (var adUser in distinctUsers)
+            {
+                if (!string.IsNullOrEmpty(adUser.UserName))
+                {
+                    try
+                    {
+                        // Use existing GetUserDetailsByUsername method - no new AD calls needed
+                        var userDetails = GetUserDetailsByUsername(adUser.UserName);
+                        if (userDetails != null)
+                        {
+                            adUserDetails.Add(userDetails);
+                        }
+                    }
+                    catch
+                    {
+                        // Skip problematic users but continue processing
+                        continue;
+                    }
+                }
+            }
+
+            return adUserDetails;
         }
 
         private void AddUsersFromSearch(List<ADUserModel> adUsers, UserPrincipal user, PrincipalContext context)

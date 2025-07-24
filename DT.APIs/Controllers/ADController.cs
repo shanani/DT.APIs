@@ -1,4 +1,4 @@
-using DT.APIs.Helpers;
+﻿using DT.APIs.Helpers;
 using DT.APIs.Models;
 using DT.APIs.Models.DTOs;
 using Microsoft.AspNetCore.Authorization;
@@ -80,60 +80,50 @@ namespace DT.APIs.Controllers
             }
         }
 
-         
-      
+
+
 
         [HttpGet("users/search-ad")]
-        [ProducesResponseType(typeof(IEnumerable<ADUserModel>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(IEnumerable<ADUserDetails>), StatusCodes.Status200OK)]  // CHANGED: ADUserModel → ADUserDetails
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> SearchADUsers([FromQuery] string searchKey, [FromQuery] int maxResults = 10)
         {
             var requestId = Guid.NewGuid().ToString("N")[..8];
-
             if (string.IsNullOrWhiteSpace(searchKey))
             {
                 _logger.LogWarning("[{RequestId}] Search key is null or empty", requestId);
                 return BadRequest("Search key is required and must be at least 3 characters.");
             }
-
             if (searchKey.Trim().Length < 3)
             {
                 _logger.LogWarning("[{RequestId}] Search key too short: '{SearchKey}'", requestId, searchKey);
                 return BadRequest("Search key must be at least 3 characters long.");
             }
-
             if (maxResults < 0)
             {
                 _logger.LogWarning("[{RequestId}] Invalid maxResults value: {MaxResults}", requestId, maxResults);
                 return BadRequest("maxResults cannot be negative.");
             }
-
             _logger.LogInformation("[{RequestId}] Starting AD user search with key: '{SearchKey}', maxResults: {MaxResults}",
                 requestId, searchKey, maxResults);
-
             try
             {
                 using (var adHelper = new ADHelper(_configuration))
                 {
                     var allUsers = await Task.Run(() => adHelper.FindUsers(searchKey));
-
                     if (allUsers == null || !allUsers.Any())
                     {
                         _logger.LogInformation("[{RequestId}] No users found for search key: '{SearchKey}'", requestId, searchKey);
                         return NotFound($"No users found matching the search criteria '{searchKey}'");
                     }
-
                     // Apply maxResults filter
                     var users = maxResults == 0 ? allUsers : allUsers.Take(maxResults).ToList();
-
                     _logger.LogInformation("[{RequestId}] AD search completed. Found {TotalUsers} users, returning {ReturnedUsers} users for search key: '{SearchKey}'",
                         requestId, allUsers.Count, users.Count, searchKey);
-
                     _logger.LogDebug("[{RequestId}] Returning users: [{UserNames}]",
-                        requestId, string.Join(", ", users.Select(u => u.UserName)));
-
+                        requestId, string.Join(", ", users.Select(u => u.LoginName)));
                     return Ok(users);
                 }
             }
@@ -146,7 +136,7 @@ namespace DT.APIs.Controllers
         }
 
 
-     
+
 
         [HttpPost("users/authenticate-ad")]
         [ProducesResponseType(typeof(ADUserDetails), StatusCodes.Status200OK)]
